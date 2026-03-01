@@ -43,6 +43,13 @@ impl EventBus {
         self.sender.subscribe()
     }
 
+    /// Expose the underlying broadcast sender.
+    ///
+    /// Protocol servers use this to subscribe independently.
+    pub fn raw_sender(&self) -> broadcast::Sender<Event> {
+        self.sender.clone()
+    }
+
     /// Number of active subscribers.
     pub fn subscriber_count(&self) -> usize {
         self.sender.receiver_count()

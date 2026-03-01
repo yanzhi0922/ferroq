@@ -77,15 +77,68 @@ async fn main() -> anyhow::Result<()> {
     // Create and start the gateway runtime
     let mut runtime = ferroq_gateway::runtime::GatewayRuntime::new(config.clone());
 
-    // TODO: Phase 1.3 — instantiate adapters based on config
+    // Instantiate backend adapters from config.
+    for account in &config.accounts {
+        let adapter = match account.backend.backend_type.as_str() {
+            "lagrange" | "napcat" => {
+                // Both Lagrange and NapCat expose an OneBot v11 forward WS endpoint.
+                let adapter = ferroq_gateway::adapter::LagrangeAdapter::from_backend_config(
+                    &account.name,
+                    &account.backend,
+                );
+                info!(
+                    name = %account.name,
+                    backend = %account.backend.backend_type,
+                    url = %account.backend.url,
+                    "created backend adapter"
+                );
+                std::sync::Arc::new(adapter) as std::sync::Arc<dyn ferroq_core::adapter::BackendAdapter>
+            }
+            other => {
+                tracing::warn!(name = %account.name, backend = %other, "unknown backend type, skipping");
+                continue;
+            }
+        };
+        runtime.add_adapter(adapter);
+    }
+
     // TODO: Phase 1.4 — instantiate protocol servers based on config
 
     runtime.start().await?;
 
     // Build the HTTP server (dashboard + protocol servers)
-    let app = axum::Router::new()
+    let mut app = axum::Router::new()
         .nest("/dashboard", ferroq_web::dashboard_routes())
         .route("/health", axum::routing::get(|| async { "ok" }));
+
+    // OneBot v11 protocol server.
+    let onebot_v11_server = if let Some(ref ob_config) = config.protocols.onebot_v11 {
+        if ob_config.enabled {
+            let server = ferroq_gateway::server::OneBotV11Server::new(
+                ob_config.clone(),
+                config.server.access_token.clone(),
+            );
+            // Build the sub-router for /onebot/v11/*.
+            let ob_router = server.build_router(
+                runtime.router().clone(),
+                runtime.bus().raw_sender(),
+            );
+            app = app.nest("/onebot/v11", ob_router);
+
+            // Start reverse WS and HTTP POST background tasks.
+            server.start_background_tasks(
+                runtime.router().clone(),
+                runtime.bus().raw_sender(),
+            );
+
+            info!("OneBot v11 protocol server enabled");
+            Some(server)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     let addr = format!("{}:{}", config.server.host, config.server.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -96,6 +149,10 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     runtime.shutdown().await?;
+    // Stop OneBot v11 background tasks.
+    if let Some(ref server) = onebot_v11_server {
+        server.stop_background_tasks();
+    }
     info!("ferroq shut down cleanly");
     Ok(())
 }

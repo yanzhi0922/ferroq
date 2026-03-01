@@ -12,3 +12,10 @@ pub mod error;
 pub mod event;
 pub mod message;
 pub mod protocol;
+
+/// Re-export key types for convenience.
+pub use adapter::{AdapterInfo, AdapterState, BackendAdapter};
+pub use api::{ApiRequest, ApiResponse};
+pub use config::AppConfig;
+pub use error::GatewayError;
+pub use event::Event;
