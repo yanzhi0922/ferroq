@@ -12,7 +12,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
-repository = "https://github.com/YanZhangN/ferroq"
+repository = "https://github.com/yanzhi0922/ferroq"
 description = "High-performance QQ Bot unified gateway"
 
 [workspace.dependencies]

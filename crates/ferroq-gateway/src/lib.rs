@@ -15,3 +15,4 @@ pub mod onebot_v11;
 pub mod router;
 pub mod runtime;
 pub mod server;
+pub mod stats;

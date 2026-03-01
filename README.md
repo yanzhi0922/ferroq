@@ -4,7 +4,7 @@
 
 **High-performance QQ Bot unified gateway** — written in pure Rust
 
-[![CI](https://github.com/YanZhangN/ferroq/actions/workflows/ci.yml/badge.svg)](https://github.com/YanZhangN/ferroq/actions/workflows/ci.yml)
+[![CI](https://github.com/yanzhi0922/ferroq/actions/workflows/ci.yml/badge.svg)](https://github.com/yanzhi0922/ferroq/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 *One gateway to rule them all — connect any QQ protocol backend, serve any bot framework.*
@@ -65,7 +65,7 @@ Instead of reimplementing the QQ protocol, ferroq acts as a **unified proxy / ro
 ### From Source
 
 ```bash
-git clone https://github.com/YanZhangN/ferroq.git
+git clone https://github.com/yanzhi0922/ferroq.git
 cd ferroq
 cargo build --release
 
@@ -111,9 +111,10 @@ See [config.example.yaml](config.example.yaml) for the full configuration refere
 
 ## Roadmap
 
-- [x] **Phase 1** — Core skeleton + Lagrange adapter + OneBot v11
-- [ ] **Phase 2** — NapCat adapter + Dashboard + Storage + Multi-account
-- [ ] **Phase 3** — Plugin system + Milky/Satori + Benchmarks + Release
+- [x] **Phase 1** — Core skeleton + Lagrange adapter + OneBot v11 server
+- [x] **Phase 2.1** — Integration tests + Config validation + Health API + Dashboard
+- [ ] **Phase 2.2** — Message storage + Multi-account management + Plugin system
+- [ ] **Phase 3** — Milky/Satori protocols + Benchmarks + Release
 
 ## Project Structure
 

@@ -13,16 +13,20 @@ use tracing::{error, info, warn};
 
 use crate::bus::EventBus;
 use crate::router::ApiRouter;
+use crate::stats::{AdapterSnapshot, RuntimeStats};
 
 /// The gateway runtime manages all components and their lifecycle.
 pub struct GatewayRuntime {
     config: AppConfig,
     bus: Arc<EventBus>,
     router: Arc<ApiRouter>,
+    stats: Arc<RuntimeStats>,
     adapters: Vec<Arc<dyn BackendAdapter>>,
     servers: Vec<Box<dyn ProtocolServer>>,
     /// Handles for the event forwarding tasks (adapter → bus).
     forward_handles: Vec<JoinHandle<()>>,
+    /// Handle for the periodic stats refresher.
+    stats_handle: Option<JoinHandle<()>>,
 }
 
 impl GatewayRuntime {
@@ -30,14 +34,17 @@ impl GatewayRuntime {
     pub fn new(config: AppConfig) -> Self {
         let bus = Arc::new(EventBus::new());
         let router = Arc::new(ApiRouter::new());
+        let stats = Arc::new(RuntimeStats::new());
 
         Self {
             config,
             bus,
             router,
+            stats,
             adapters: Vec::new(),
             servers: Vec::new(),
             forward_handles: Vec::new(),
+            stats_handle: None,
         }
     }
 
@@ -59,6 +66,11 @@ impl GatewayRuntime {
     /// Access the API router.
     pub fn router(&self) -> &Arc<ApiRouter> {
         &self.router
+    }
+
+    /// Access the runtime stats.
+    pub fn stats(&self) -> &Arc<RuntimeStats> {
+        &self.stats
     }
 
     /// Access the config.
@@ -98,10 +110,53 @@ impl GatewayRuntime {
 
             // Spawn a task that forwards events from this adapter to the bus.
             let bus = Arc::clone(&self.bus);
+            let stats = Arc::clone(&self.stats);
             let adapter_name = adapter.info().name.clone();
-            let handle = tokio::spawn(Self::forward_events(event_rx, bus, adapter_name));
+            let handle = tokio::spawn(Self::forward_events(event_rx, bus, stats, adapter_name));
             self.forward_handles.push(handle);
         }
+
+        // Spawn periodic stats refresher (update adapter snapshots every 5s).
+        let adapters_for_stats: Vec<Arc<dyn BackendAdapter>> =
+            self.adapters.iter().map(Arc::clone).collect();
+        let stats_clone = Arc::clone(&self.stats);
+        self.stats_handle = Some(tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            loop {
+                interval.tick().await;
+                let snapshots: Vec<AdapterSnapshot> = adapters_for_stats
+                    .iter()
+                    .map(|a| {
+                        let info = a.info();
+                        AdapterSnapshot {
+                            name: info.name,
+                            backend_type: info.backend_type,
+                            url: info.url,
+                            state: info.state,
+                            self_id: info.self_id,
+                        }
+                    })
+                    .collect();
+                stats_clone.update_adapters(snapshots);
+            }
+        }));
+
+        // Do an initial snapshot immediately.
+        let snapshots: Vec<AdapterSnapshot> = self
+            .adapters
+            .iter()
+            .map(|a| {
+                let info = a.info();
+                AdapterSnapshot {
+                    name: info.name,
+                    backend_type: info.backend_type,
+                    url: info.url,
+                    state: info.state,
+                    self_id: info.self_id,
+                }
+            })
+            .collect();
+        self.stats.update_adapters(snapshots);
 
         info!("ferroq gateway started");
         Ok(())
@@ -111,11 +166,13 @@ impl GatewayRuntime {
     async fn forward_events(
         mut event_rx: mpsc::UnboundedReceiver<Event>,
         bus: Arc<EventBus>,
+        stats: Arc<RuntimeStats>,
         adapter_name: String,
     ) {
         let mut count: u64 = 0;
         while let Some(event) = event_rx.recv().await {
             count += 1;
+            stats.record_event();
             if count % 1000 == 0 {
                 info!(
                     adapter = %adapter_name,
@@ -142,6 +199,11 @@ impl GatewayRuntime {
         // Abort forwarding tasks.
         for handle in self.forward_handles.drain(..) {
             handle.abort();
+        }
+
+        // Abort stats refresher.
+        if let Some(h) = self.stats_handle.take() {
+            h.abort();
         }
 
         info!("ferroq gateway shut down");

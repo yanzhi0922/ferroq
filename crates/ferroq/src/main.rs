@@ -67,6 +67,25 @@ async fn main() -> anyhow::Result<()> {
     let config_str = std::fs::read_to_string(config_path)?;
     let config: ferroq_core::config::AppConfig = serde_yaml::from_str(&config_str)?;
 
+    // Validate config before proceeding.
+    let issues = ferroq_core::validation::validate(&config);
+    for issue in &issues {
+        match issue.severity {
+            ferroq_core::validation::Severity::Error => {
+                tracing::error!("{issue}");
+            }
+            ferroq_core::validation::Severity::Warning => {
+                tracing::warn!("{issue}");
+            }
+        }
+    }
+    if ferroq_core::validation::has_errors(&issues) {
+        anyhow::bail!(
+            "configuration has {} error(s) — fix them and restart",
+            issues.iter().filter(|i| i.severity == ferroq_core::validation::Severity::Error).count()
+        );
+    }
+
     info!(
         host = %config.server.host,
         port = config.server.port,
@@ -107,9 +126,17 @@ async fn main() -> anyhow::Result<()> {
     runtime.start().await?;
 
     // Build the HTTP server (dashboard + protocol servers)
+    let stats = runtime.stats().clone();
+    let health_stats = stats.clone();
     let mut app = axum::Router::new()
         .nest("/dashboard", ferroq_web::dashboard_routes())
-        .route("/health", axum::routing::get(|| async { "ok" }));
+        .route(
+            "/health",
+            axum::routing::get(move || {
+                let s = health_stats.clone();
+                async move { axum::Json(s.health()) }
+            }),
+        );
 
     // OneBot v11 protocol server.
     let onebot_v11_server = if let Some(ref ob_config) = config.protocols.onebot_v11 {

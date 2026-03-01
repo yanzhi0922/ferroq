@@ -12,6 +12,7 @@ pub mod error;
 pub mod event;
 pub mod message;
 pub mod protocol;
+pub mod validation;
 
 /// Re-export key types for convenience.
 pub use adapter::{AdapterInfo, AdapterState, BackendAdapter};
