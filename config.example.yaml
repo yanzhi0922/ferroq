@@ -1,0 +1,70 @@
+# ferroq Configuration
+# High-performance QQ Bot unified gateway
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  # Global access token for API authentication (leave empty to disable)
+  access_token: ""
+  # Enable the web dashboard
+  dashboard: true
+
+# Backend accounts — each account connects to one QQ protocol backend
+accounts:
+  - name: "main"
+    backend:
+      # Backend type: lagrange, napcat, official, mock
+      type: lagrange
+      # WebSocket URL of the backend (Lagrange.OneBot forward WS)
+      url: "ws://127.0.0.1:8081/onebot/v11/ws"
+      # Access token for the backend
+      access_token: ""
+      # Reconnect interval in seconds
+      reconnect_interval: 5
+      # Health check interval in seconds
+      health_check_interval: 30
+
+    # Optional fallback backend (for failover)
+    # fallback:
+    #   type: napcat
+    #   url: "ws://127.0.0.1:3001"
+
+# Inbound protocol servers — how upstream bot frameworks connect
+protocols:
+  onebot_v11:
+    enabled: true
+    # HTTP API (POST /api/...)
+    http: true
+    # Forward WebSocket (ws://host:port/onebot/v11/ws)
+    ws: true
+    # Reverse WebSocket targets (gateway connects to these)
+    ws_reverse: []
+    #  - url: "ws://127.0.0.1:8765/onebot/v11/ws"
+    #    access_token: ""
+    # HTTP POST targets (gateway POSTs events to these)
+    http_post: []
+    #  - url: "http://127.0.0.1:5700"
+    #    secret: ""
+
+  # onebot_v12:
+  #   enabled: false
+
+  # milky:
+  #   enabled: false
+
+  # satori:
+  #   enabled: false
+
+# Message storage (SQLite)
+storage:
+  enabled: false
+  path: "./data/messages.db"
+  max_days: 30
+
+# Logging
+logging:
+  # Log level: trace, debug, info, warn, error
+  level: "info"
+  # Optional log file path
+  # file: "./logs/ferroq.log"
+  console: true

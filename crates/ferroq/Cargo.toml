@@ -1,0 +1,27 @@
+[package]
+name = "ferroq"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "High-performance QQ Bot unified gateway — single binary"
+
+[[bin]]
+name = "ferroq"
+path = "src/main.rs"
+
+[dependencies]
+ferroq-core.workspace = true
+ferroq-gateway.workspace = true
+ferroq-web.workspace = true
+
+tokio.workspace = true
+axum.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true
+anyhow.workspace = true
+
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
