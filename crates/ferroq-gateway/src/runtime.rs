@@ -182,6 +182,8 @@ impl GatewayRuntime {
                         healthy,
                         health_check_ms: Some(latency),
                         last_health_check: Some(now),
+                        events_total: 0,
+                        api_calls_total: 0,
                     });
                 }
                 stats_clone.update_adapters(snapshots);
@@ -203,6 +205,8 @@ impl GatewayRuntime {
                     healthy: info.state == ferroq_core::adapter::AdapterState::Connected,
                     health_check_ms: None,
                     last_health_check: None,
+                    events_total: 0,
+                    api_calls_total: 0,
                 }
             })
             .collect();

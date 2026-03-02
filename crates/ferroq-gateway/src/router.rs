@@ -57,7 +57,18 @@ impl ApiRouter {
 
     /// Route an API request to the appropriate backend.
     pub async fn route(&self, request: ApiRequest) -> Result<ApiResponse, GatewayError> {
-        let adapter = {
+        let (resp, _name) = self.route_named(request).await?;
+        Ok(resp)
+    }
+
+    /// Route an API request and also return the name of the adapter that handled it.
+    ///
+    /// Useful for callers that need to record per-adapter metrics.
+    pub async fn route_named(
+        &self,
+        request: ApiRequest,
+    ) -> Result<(ApiResponse, String), GatewayError> {
+        let (adapter, name) = {
             let adapters = self.adapters.read();
             if adapters.is_empty() {
                 return Err(GatewayError::Internal("no adapters registered".to_string()));
@@ -76,12 +87,15 @@ impl ApiRouter {
                 self.default_index.read().unwrap_or(0)
             };
 
-            adapters.get(index).cloned().ok_or_else(|| {
+            let adapter = adapters.get(index).cloned().ok_or_else(|| {
                 GatewayError::Internal(format!("adapter index {index} out of bounds"))
-            })?
+            })?;
+            let name = adapter.info().name;
+            (adapter, name)
         };
 
-        adapter.call_api(request).await
+        let resp = adapter.call_api(request).await?;
+        Ok((resp, name))
     }
 }
 
@@ -203,5 +217,40 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.data["adapter"], "known-bot");
+    }
+
+    #[tokio::test]
+    async fn route_named_returns_adapter_name() {
+        let router = ApiRouter::new();
+        let a1 = MockAdapter::new("named-bot", None);
+        let a2 = MockAdapter::new("other-bot", Some(77));
+        router.register(a1 as Arc<dyn BackendAdapter>);
+        router.register(a2 as Arc<dyn BackendAdapter>);
+
+        // Default route should return "named-bot".
+        let (resp, name) = router
+            .route_named(ApiRequest {
+                action: "test".into(),
+                params: serde_json::Value::Null,
+                echo: None,
+                self_id: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(name, "named-bot");
+        assert_eq!(resp.data["adapter"], "named-bot");
+
+        // self_id=77 should route to "other-bot".
+        let (resp2, name2) = router
+            .route_named(ApiRequest {
+                action: "test".into(),
+                params: serde_json::Value::Null,
+                echo: None,
+                self_id: Some(77),
+            })
+            .await
+            .unwrap();
+        assert_eq!(name2, "other-bot");
+        assert_eq!(resp2.data["adapter"], "other-bot");
     }
 }

@@ -119,10 +119,10 @@ const DASHBOARD_HTML: &str = r##"<!DOCTYPE html>
   </div>
   <table>
     <thead>
-      <tr><th>Name</th><th>Type</th><th>URL</th><th>State</th><th>Health</th><th>Latency</th><th>Self ID</th></tr>
+      <tr><th>Name</th><th>Type</th><th>URL</th><th>State</th><th>Health</th><th>Latency</th><th>Self ID</th><th>Events</th><th>API Calls</th></tr>
     </thead>
     <tbody id="adapters-body">
-      <tr><td colspan="7" style="color: var(--text-dim); text-align: center;">Loading...</td></tr>
+      <tr><td colspan="9" style="color: var(--text-dim); text-align: center;">Loading...</td></tr>
     </tbody>
   </table>
 
@@ -167,7 +167,7 @@ async function refresh() {
 
     const tbody = document.getElementById('adapters-body');
     if (data.adapters.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" style="color: var(--text-dim); text-align: center;">No adapters configured</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" style="color: var(--text-dim); text-align: center;">No adapters configured</td></tr>';
     } else {
       tbody.innerHTML = data.adapters.map(a => {
         const healthIcon = a.healthy ? '✓' : '✗';
@@ -181,6 +181,8 @@ async function refresh() {
         '<td style="color:' + healthColor + '; font-weight:600">' + healthIcon + '</td>' +
         '<td style="font-variant-numeric:tabular-nums">' + latency + '</td>' +
         '<td>' + (a.self_id || '-') + '</td>' +
+        '<td style="font-variant-numeric:tabular-nums">' + formatNumber(a.events_total || 0) + '</td>' +
+        '<td style="font-variant-numeric:tabular-nums">' + formatNumber(a.api_calls_total || 0) + '</td>' +
         '</tr>';
       }).join('');
     }

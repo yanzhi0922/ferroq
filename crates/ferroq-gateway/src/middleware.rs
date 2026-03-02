@@ -181,11 +181,13 @@ pub fn with_rate_limit(router: axum::Router, limiter: RateLimiter) -> axum::Rout
             if rl.try_acquire() {
                 next.run(request).await
             } else {
-                (
-                    StatusCode::TOO_MANY_REQUESTS,
-                    "rate limit exceeded",
-                )
-                    .into_response()
+                let mut response =
+                    (StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded").into_response();
+                response.headers_mut().insert(
+                    axum::http::header::RETRY_AFTER,
+                    axum::http::HeaderValue::from_static("1"),
+                );
+                response
             }
         }
     }))

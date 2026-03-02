@@ -207,9 +207,11 @@ async fn handle_http_api(
         self_id: None,
     };
 
-    state.stats.record_api_call();
-    match state.router.route(request).await {
-        Ok(resp) => Json(resp).into_response(),
+    match state.router.route_named(request).await {
+        Ok((resp, adapter_name)) => {
+            state.stats.record_api_call_for(&adapter_name);
+            Json(resp).into_response()
+        }
         Err(e) => {
             let resp = ApiResponse::fail(1400, e.to_string());
             Json(resp).into_response()
@@ -217,7 +219,6 @@ async fn handle_http_api(
     }
 }
 
-/// Handle legacy HTTP API: `POST /api` with action in body.
 async fn handle_http_api_legacy(
     State(state): State<Arc<ServerState>>,
     Query(query): Query<AuthQuery>,
@@ -236,9 +237,11 @@ async fn handle_http_api_legacy(
         }
     };
 
-    state.stats.record_api_call();
-    match state.router.route(request).await {
-        Ok(resp) => Json(resp).into_response(),
+    match state.router.route_named(request).await {
+        Ok((resp, adapter_name)) => {
+            state.stats.record_api_call_for(&adapter_name);
+            Json(resp).into_response()
+        }
         Err(e) => {
             let resp = ApiResponse::fail(1400, e.to_string());
             Json(resp).into_response()
@@ -329,9 +332,9 @@ async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
 
                 // Process API call and send response back on the same WS.
                 tokio::spawn(async move {
-                    stats_clone.record_api_call();
-                    let resp = match router_clone.route(request).await {
-                        Ok(mut r) => {
+                    let resp = match router_clone.route_named(request).await {
+                        Ok((mut r, adapter_name)) => {
+                            stats_clone.record_api_call_for(&adapter_name);
                             r.echo = echo;
                             r
                         }
@@ -422,9 +425,9 @@ async fn reverse_ws_task(
                             let stats_clone = Arc::clone(&stats);
 
                             tokio::spawn(async move {
-                                stats_clone.record_api_call();
-                                let resp = match router_clone.route(request).await {
-                                    Ok(mut r) => {
+                                let resp = match router_clone.route_named(request).await {
+                                    Ok((mut r, adapter_name)) => {
+                                        stats_clone.record_api_call_for(&adapter_name);
                                         r.echo = echo;
                                         r
                                     }

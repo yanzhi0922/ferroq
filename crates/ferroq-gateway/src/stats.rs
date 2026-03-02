@@ -49,6 +49,10 @@ pub struct AdapterSnapshot {
     pub health_check_ms: Option<u64>,
     /// Unix timestamp of the last health check.
     pub last_health_check: Option<u64>,
+    /// Total events forwarded by this adapter.
+    pub events_total: u64,
+    /// Total API calls routed to this adapter.
+    pub api_calls_total: u64,
 }
 
 /// Full health check response body.
@@ -136,7 +140,19 @@ impl RuntimeStats {
 
     /// Build a full health response.
     pub fn health(&self) -> HealthResponse {
-        let adapters = self.adapters.read().clone();
+        let events_map = self.per_adapter_events.read().clone();
+        let api_map = self.per_adapter_api_calls.read().clone();
+        let adapters: Vec<AdapterSnapshot> = self
+            .adapters
+            .read()
+            .iter()
+            .map(|a| {
+                let mut s = a.clone();
+                s.events_total = events_map.get(&a.name).copied().unwrap_or(0);
+                s.api_calls_total = api_map.get(&a.name).copied().unwrap_or(0);
+                s
+            })
+            .collect();
         let healthy_adapters = adapters.iter().filter(|a| a.healthy).count();
         let total_adapters = adapters.len();
         HealthResponse {
@@ -311,5 +327,38 @@ mod tests {
         let output = stats.prometheus_metrics();
         assert!(output.contains("ferroq_adapter_events_total{name=\"test-adapter\"} 1"));
         assert!(output.contains("ferroq_adapter_api_calls_total{name=\"test-adapter\"} 1"));
+    }
+
+    #[test]
+    fn health_merges_per_adapter_counters_into_snapshots() {
+        use ferroq_core::adapter::AdapterState;
+
+        let stats = RuntimeStats::new();
+
+        // Register a snapshot with zero counts.
+        stats.update_adapters(vec![AdapterSnapshot {
+            name: "bot-x".to_string(),
+            backend_type: "mock".to_string(),
+            url: "ws://mock".to_string(),
+            state: AdapterState::Connected,
+            self_id: None,
+            healthy: true,
+            health_check_ms: None,
+            last_health_check: None,
+            events_total: 0,
+            api_calls_total: 0,
+        }]);
+
+        // Record some activity.
+        stats.record_event_for("bot-x");
+        stats.record_event_for("bot-x");
+        stats.record_api_call_for("bot-x");
+        stats.record_api_call_for("bot-x");
+        stats.record_api_call_for("bot-x");
+
+        let health = stats.health();
+        let snap = health.adapters.iter().find(|a| a.name == "bot-x").unwrap();
+        assert_eq!(snap.events_total, 2);
+        assert_eq!(snap.api_calls_total, 3);
     }
 }
