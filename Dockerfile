@@ -6,7 +6,7 @@
 # ============================================================================
 
 # Stage 1: Build
-FROM rust:1.85-alpine AS builder
+FROM rust:alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache musl-dev
@@ -14,7 +14,7 @@ RUN apk add --no-cache musl-dev
 WORKDIR /app
 
 # Copy manifests first for better caching
-COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY Cargo.toml Cargo.lock ./
 COPY crates/ferroq-core/Cargo.toml crates/ferroq-core/
 COPY crates/ferroq-gateway/Cargo.toml crates/ferroq-gateway/
 COPY crates/ferroq-web/Cargo.toml crates/ferroq-web/
