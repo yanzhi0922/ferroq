@@ -22,3 +22,7 @@ logs/
 config.yaml
 *.db
 .env
+
+# mdbook build output
+docs/book/
+docs/book-zh/
