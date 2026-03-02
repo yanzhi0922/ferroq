@@ -128,7 +128,11 @@ impl GatewayRuntime {
 
     /// Connect all registered adapters via the adapter manager and start
     /// background tasks (stats, persistence, cleanup).
-    pub async fn start(&mut self, manager: &AdapterManager) -> Result<(), GatewayError> {
+    pub async fn start(
+        &mut self,
+        manager: &AdapterManager,
+        manager_arc: Arc<AdapterManager>,
+    ) -> Result<(), GatewayError> {
         info!(
             adapters = self.adapters.len(),
             servers = self.servers.len(),
@@ -164,22 +168,26 @@ impl GatewayRuntime {
 
         // Spawn periodic stats refresher + health checker + dynamic self_id association (every 5s).
         // Uses the adapter manager to enumerate all adapters (including dynamically added ones).
-        let adapters_for_stats: Vec<Arc<dyn BackendAdapter>> =
-            self.adapters.iter().map(Arc::clone).collect();
+        let manager_for_stats = Arc::clone(&manager_arc);
         let stats_clone = Arc::clone(&self.stats);
         let router_clone = Arc::clone(&self.router);
         self.stats_handle = Some(tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
             loop {
                 interval.tick().await;
-                let mut snapshots = Vec::with_capacity(adapters_for_stats.len());
-                for (index, a) in adapters_for_stats.iter().enumerate() {
+                let current_adapters = manager_for_stats.adapters();
+                let router_names = router_clone.list_names();
+                let mut snapshots = Vec::with_capacity(current_adapters.len());
+                for a in &current_adapters {
                     let info = a.info();
 
                     // Dynamic self_id → router association.
-                    // If the adapter now knows its self_id, update the routing table.
+                    // Look up the adapter's current index in the router by name
+                    // so that index is always correct even after add/remove.
                     if let Some(self_id) = info.self_id {
-                        router_clone.associate_self_id(self_id, index);
+                        if let Some(index) = router_names.iter().position(|n| n == &info.name) {
+                            router_clone.associate_self_id(self_id, index);
+                        }
                     }
 
                     let start = std::time::Instant::now();
@@ -235,16 +243,30 @@ impl GatewayRuntime {
             let mut persist_rx = self.bus.subscribe();
             self.persist_handle = Some(tokio::spawn(async move {
                 let mut stored: u64 = 0;
-                while let Ok(event) = persist_rx.recv().await {
-                    if let Event::Message(ref msg) = event {
-                        if let Err(e) = store_clone.insert(msg).await {
-                            warn!("failed to persist message: {e}");
-                        } else {
-                            stored += 1;
-                            stats_clone2.record_message_stored();
-                            if stored % 1000 == 0 {
-                                info!(total = stored, "message persistence progress");
+                loop {
+                    match persist_rx.recv().await {
+                        Ok(event) => {
+                            if let Event::Message(ref msg) = event {
+                                if let Err(e) = store_clone.insert(msg).await {
+                                    warn!("failed to persist message: {e}");
+                                } else {
+                                    stored += 1;
+                                    stats_clone2.record_message_stored();
+                                    if stored % 1000 == 0 {
+                                        info!(total = stored, "message persistence progress");
+                                    }
+                                }
                             }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            warn!(
+                                skipped = n,
+                                "persist task: broadcast lagged, some events may not be stored"
+                            );
+                            // Continue — don't exit the loop.
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            break;
                         }
                     }
                 }

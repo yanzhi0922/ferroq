@@ -228,7 +228,9 @@ async fn main() -> anyhow::Result<()> {
             runtime.dedup().clone(),
         ));
 
-    runtime.start(&adapter_manager).await?;
+    runtime
+        .start(&adapter_manager, std::sync::Arc::clone(&adapter_manager))
+        .await?;
 
     // Build the HTTP server (dashboard + management API + protocol servers)
     let stats = runtime.stats().clone();
