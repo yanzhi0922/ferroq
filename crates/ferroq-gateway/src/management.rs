@@ -301,3 +301,267 @@ async fn handle_config(
         "data": config,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request as HttpRequest, StatusCode};
+    use tower::ServiceExt;
+
+    use crate::router::ApiRouter;
+    use crate::shared_config::SharedConfig;
+    use crate::stats::{AdapterSnapshot, RuntimeStats};
+
+    /// Build a management API router with sensible test defaults.
+    fn build_test_app() -> (axum::Router, Arc<RuntimeStats>) {
+        let router = Arc::new(ApiRouter::new());
+        let stats = Arc::new(RuntimeStats::new());
+        let shared_config = Arc::new(SharedConfig::new(String::new()));
+        let app = management_routes(router, stats.clone(), None, None, shared_config, None);
+        (app, stats)
+    }
+
+    #[tokio::test]
+    async fn accounts_returns_empty_list() {
+        let (app, _stats) = build_test_app();
+        let req = HttpRequest::builder()
+            .uri("/accounts")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "ok");
+        assert!(json["data"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn accounts_lists_registered_adapters() {
+        let (app, stats) = build_test_app();
+
+        // Simulate an adapter snapshot in stats.
+        stats.update_adapters(vec![AdapterSnapshot {
+            name: "test-bot".into(),
+            backend_type: "lagrange".into(),
+            url: "ws://mock:1234".into(),
+            state: ferroq_core::adapter::AdapterState::Connected,
+            self_id: Some(42),
+            healthy: true,
+            health_check_ms: Some(5),
+            last_health_check: None,
+            events_total: 0,
+            api_calls_total: 0,
+        }]);
+
+        let req = HttpRequest::builder()
+            .uri("/accounts")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let accounts = json["data"].as_array().unwrap();
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0]["name"], "test-bot");
+        assert_eq!(accounts[0]["backend_type"], "lagrange");
+        assert_eq!(accounts[0]["self_id"], 42);
+    }
+
+    #[tokio::test]
+    async fn stats_returns_health_response() {
+        let (app, stats) = build_test_app();
+        // Generate some activity.
+        stats.record_event_for("a");
+        stats.record_api_call_for("a");
+        stats.record_api_call_for("a");
+
+        let req = HttpRequest::builder()
+            .uri("/stats")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "ok");
+        assert_eq!(json["events_total"], 1);
+        assert_eq!(json["api_calls_total"], 2);
+    }
+
+    #[tokio::test]
+    async fn messages_returns_error_when_storage_disabled() {
+        let (app, _stats) = build_test_app();
+        let req = HttpRequest::builder()
+            .uri("/messages")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "failed");
+        assert!(json["message"].as_str().unwrap().contains("not enabled"));
+    }
+
+    #[tokio::test]
+    async fn reload_fails_without_config_path() {
+        let (app, _stats) = build_test_app();
+        let req = HttpRequest::builder()
+            .method("POST")
+            .uri("/reload")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "failed");
+        assert!(json["message"].as_str().unwrap().contains("config path"));
+    }
+
+    #[tokio::test]
+    async fn config_fails_without_config_path() {
+        let (app, _stats) = build_test_app();
+        let req = HttpRequest::builder()
+            .uri("/config")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "failed");
+        assert!(json["message"].as_str().unwrap().contains("config path"));
+    }
+
+    #[tokio::test]
+    async fn reload_with_valid_config_file() {
+        // Write a minimal valid config to a temp file.
+        let dir = std::env::temp_dir().join("ferroq_test_reload");
+        let _ = std::fs::create_dir_all(&dir);
+        let config_file = dir.join("test_config.yaml");
+        std::fs::write(
+            &config_file,
+            r#"
+server:
+  host: "0.0.0.0"
+  port: 8080
+  access_token: "new-token"
+accounts: []
+protocols: {}
+storage:
+  enabled: false
+  path: "./data/messages.db"
+  max_days: 30
+logging:
+  level: info
+  console: true
+"#,
+        )
+        .unwrap();
+
+        let router = Arc::new(ApiRouter::new());
+        let stats = Arc::new(RuntimeStats::new());
+        let shared_config = Arc::new(SharedConfig::new("old-token".into()));
+        let app = management_routes(
+            router,
+            stats,
+            None,
+            Some(config_file.clone()),
+            shared_config.clone(),
+            None,
+        );
+
+        let req = HttpRequest::builder()
+            .method("POST")
+            .uri("/reload")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "ok");
+
+        // Access token should have been updated.
+        assert_eq!(shared_config.access_token(), "new-token");
+
+        // Cleanup.
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn config_endpoint_redacts_secrets() {
+        let dir = std::env::temp_dir().join("ferroq_test_config");
+        let _ = std::fs::create_dir_all(&dir);
+        let config_file = dir.join("test_config.yaml");
+        std::fs::write(
+            &config_file,
+            r#"
+server:
+  host: "0.0.0.0"
+  port: 8080
+  access_token: "super-secret"
+accounts:
+  - name: "bot1"
+    backend:
+      type: lagrange
+      url: "ws://localhost:1234"
+      access_token: "backend-secret"
+protocols: {}
+storage:
+  enabled: false
+  path: "./data/messages.db"
+  max_days: 30
+logging:
+  level: info
+  console: true
+"#,
+        )
+        .unwrap();
+
+        let router = Arc::new(ApiRouter::new());
+        let stats = Arc::new(RuntimeStats::new());
+        let shared_config = Arc::new(SharedConfig::new(String::new()));
+        let app = management_routes(
+            router,
+            stats,
+            None,
+            Some(config_file.clone()),
+            shared_config,
+            None,
+        );
+
+        let req = HttpRequest::builder()
+            .uri("/config")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "ok");
+
+        // Secrets should be redacted.
+        let data = &json["data"];
+        assert_eq!(data["server"]["access_token"], "***");
+        assert_eq!(data["accounts"][0]["backend"]["access_token"], "***");
+
+        // But non-secrets should remain.
+        assert_eq!(data["accounts"][0]["name"], "bot1");
+
+        // Cleanup.
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

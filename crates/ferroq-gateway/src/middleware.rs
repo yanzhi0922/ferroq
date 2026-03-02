@@ -334,5 +334,11 @@ mod tests {
             .unwrap();
         let resp2 = app2.oneshot(req2).await.unwrap();
         assert_eq!(resp2.status(), StatusCode::TOO_MANY_REQUESTS);
+
+        // Verify the Retry-After header is present.
+        assert_eq!(
+            resp2.headers().get("retry-after").and_then(|v| v.to_str().ok()),
+            Some("1"),
+        );
     }
 }
