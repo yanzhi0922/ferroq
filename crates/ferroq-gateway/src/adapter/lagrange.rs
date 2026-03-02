@@ -51,6 +51,7 @@ struct Inner {
 /// calls as JSON over the same WebSocket.
 pub struct LagrangeAdapter {
     name: String,
+    backend_type: String,
     url: String,
     access_token: String,
     reconnect_interval: Duration,
@@ -77,6 +78,7 @@ impl LagrangeAdapter {
     ) -> Self {
         Self {
             name: name.into(),
+            backend_type: "lagrange".to_string(),
             url: url.into(),
             access_token: access_token.into(),
             reconnect_interval: Duration::from_secs(reconnect_interval_secs),
@@ -103,7 +105,7 @@ impl LagrangeAdapter {
         name: impl Into<String>,
         cfg: &ferroq_core::config::BackendConfig,
     ) -> Self {
-        Self::new(
+        let mut adapter = Self::new(
             name,
             &cfg.url,
             &cfg.access_token,
@@ -112,7 +114,9 @@ impl LagrangeAdapter {
             cfg.health_check_interval,
             cfg.connect_timeout,
             cfg.api_timeout,
-        )
+        );
+        adapter.backend_type = cfg.backend_type.clone();
+        adapter
     }
 
     /// Build a WebSocket request with optional auth header.
@@ -459,7 +463,7 @@ impl BackendAdapter for LagrangeAdapter {
         let guard = self.inner.lock();
         AdapterInfo {
             name: self.name.clone(),
-            backend_type: "lagrange".to_string(),
+            backend_type: self.backend_type.clone(),
             url: self.url.clone(),
             state: guard.state,
             self_id: guard.self_id,

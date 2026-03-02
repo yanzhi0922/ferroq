@@ -37,10 +37,20 @@ accounts:
       # API call response timeout in seconds
       api_timeout: 30
 
-    # Optional fallback backend (for failover)
+    # Optional fallback backend (for failover).
+    # When configured, ferroq wraps primary + fallback in a FailoverAdapter:
+    #   - API calls try primary first; on connection error, retry on fallback.
+    #   - Events flow from both backends.
+    #   - health_check() succeeds if either is healthy.
     # fallback:
     #   type: napcat
     #   url: "ws://127.0.0.1:3001"
+    #   access_token: ""
+    #   reconnect_interval: 5
+    #   max_reconnect_interval: 120
+    #   health_check_interval: 30
+    #   connect_timeout: 15
+    #   api_timeout: 30
 
 # Inbound protocol servers — how upstream bot frameworks connect
 protocols:

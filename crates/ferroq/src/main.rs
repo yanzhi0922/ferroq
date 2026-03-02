@@ -138,26 +138,74 @@ async fn main() -> anyhow::Result<()> {
 
     // Instantiate backend adapters from config.
     for account in &config.accounts {
-        let adapter = match account.backend.backend_type.as_str() {
-            "lagrange" | "napcat" => {
-                // Both Lagrange and NapCat expose an OneBot v11 forward WS endpoint.
-                let adapter = ferroq_gateway::adapter::LagrangeAdapter::from_backend_config(
-                    &account.name,
-                    &account.backend,
-                );
-                info!(
-                    name = %account.name,
-                    backend = %account.backend.backend_type,
-                    url = %account.backend.url,
-                    "created backend adapter"
-                );
-                std::sync::Arc::new(adapter) as std::sync::Arc<dyn ferroq_core::adapter::BackendAdapter>
-            }
-            other => {
-                tracing::warn!(name = %account.name, backend = %other, "unknown backend type, skipping");
-                continue;
-            }
-        };
+        let primary: std::sync::Arc<dyn ferroq_core::adapter::BackendAdapter> =
+            match account.backend.backend_type.as_str() {
+                "lagrange" | "napcat" => {
+                    // Both Lagrange and NapCat expose an OneBot v11 forward WS endpoint.
+                    let adapter = ferroq_gateway::adapter::LagrangeAdapter::from_backend_config(
+                        &account.name,
+                        &account.backend,
+                    );
+                    info!(
+                        name = %account.name,
+                        backend = %account.backend.backend_type,
+                        url = %account.backend.url,
+                        "created backend adapter"
+                    );
+                    std::sync::Arc::new(adapter)
+                }
+                other => {
+                    tracing::warn!(name = %account.name, backend = %other, "unknown backend type, skipping");
+                    continue;
+                }
+            };
+
+        // If a fallback backend is configured, wrap primary + fallback in a FailoverAdapter.
+        let adapter: std::sync::Arc<dyn ferroq_core::adapter::BackendAdapter> =
+            if let Some(ref fb_config) = account.fallback {
+                let fallback: std::sync::Arc<dyn ferroq_core::adapter::BackendAdapter> =
+                    match fb_config.backend_type.as_str() {
+                        "lagrange" | "napcat" => {
+                            let fb_adapter =
+                                ferroq_gateway::adapter::LagrangeAdapter::from_backend_config(
+                                    format!("{}-fallback", account.name),
+                                    fb_config,
+                                );
+                            info!(
+                                name = %account.name,
+                                fallback_backend = %fb_config.backend_type,
+                                fallback_url = %fb_config.url,
+                                "created fallback adapter"
+                            );
+                            std::sync::Arc::new(fb_adapter)
+                        }
+                        other => {
+                            tracing::warn!(
+                                name = %account.name,
+                                fallback_backend = %other,
+                                "unknown fallback backend type, ignoring fallback"
+                            );
+                            // Use primary only, no failover.
+                            primary.clone()
+                        }
+                    };
+                // Only wrap if we didn't fall through (fallback is a clone of primary).
+                if std::sync::Arc::ptr_eq(&fallback, &primary) {
+                    primary
+                } else {
+                    info!(name = %account.name, "failover enabled");
+                    std::sync::Arc::new(
+                        ferroq_gateway::adapter::FailoverAdapter::new(
+                            &account.name,
+                            primary,
+                            fallback,
+                        ),
+                    )
+                }
+            } else {
+                primary
+            };
+
         runtime.add_adapter(adapter);
     }
 
