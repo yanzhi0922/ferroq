@@ -11,6 +11,7 @@ pub mod config;
 pub mod error;
 pub mod event;
 pub mod message;
+pub mod plugin;
 pub mod protocol;
 pub mod validation;
 
@@ -20,3 +21,4 @@ pub use api::{ApiRequest, ApiResponse};
 pub use config::AppConfig;
 pub use error::GatewayError;
 pub use event::Event;
+pub use plugin::{PluginInfo, PluginResult};

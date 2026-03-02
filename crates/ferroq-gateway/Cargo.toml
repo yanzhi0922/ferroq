@@ -6,6 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 description = "Gateway logic: backend adapters, protocol servers, event bus"
 
+[features]
+default = ["wasm-plugins"]
+wasm-plugins = ["dep:wasmtime"]
+
 [dependencies]
 ferroq-core.workspace = true
 
@@ -25,6 +29,7 @@ rusqlite.workspace = true
 
 tracing.workspace = true
 thiserror.workspace = true
+anyhow.workspace = true
 
 chrono.workspace = true
 uuid.workspace = true
@@ -34,6 +39,9 @@ hmac.workspace = true
 sha1.workspace = true
 hex.workspace = true
 rand.workspace = true
+
+# WASM plugin runtime (optional)
+wasmtime = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }

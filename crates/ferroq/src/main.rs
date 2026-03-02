@@ -138,6 +138,27 @@ async fn main() -> anyhow::Result<()> {
         "loaded configuration"
     );
 
+    // Initialize the WASM plugin engine
+    let plugin_engine = std::sync::Arc::new(
+        ferroq_gateway::plugin_engine::PluginEngine::new()
+            .map_err(|e| anyhow::anyhow!("failed to create plugin engine: {}", e))?,
+    );
+
+    // Load plugins from config
+    if !config.plugins.is_empty() {
+        info!(count = config.plugins.len(), "loading WASM plugins");
+        if let Err(e) = plugin_engine.load_plugins(&config.plugins) {
+            tracing::warn!(error = %e, "some plugins failed to load");
+        }
+        for plugin_info in plugin_engine.list_plugins() {
+            info!(
+                name = %plugin_info.name,
+                version = %plugin_info.version,
+                "plugin ready"
+            );
+        }
+    }
+
     // Create and start the gateway runtime
     let mut runtime = ferroq_gateway::runtime::GatewayRuntime::new(config.clone());
 

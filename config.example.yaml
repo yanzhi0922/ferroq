@@ -102,6 +102,22 @@ dedup:
   # window are considered duplicates.
   window_secs: 60
 
+# WASM Plugins — extend ferroq with custom logic
+# Plugins can intercept events and API calls, enabling:
+#   - Message filtering and transformation
+#   - Auto-reply functionality
+#   - Rate limiting
+#   - Custom logging and analytics
+# See plugins/README.md for plugin development guide.
+plugins: []
+#  - path: "./plugins/echo.wasm"
+#    enabled: true
+#    config:
+#      prefix: "[echo] "
+#      keyword: ""
+#      echo_group: true
+#      echo_private: true
+
 # Logging
 logging:
   # Log level: trace, debug, info, warn, error

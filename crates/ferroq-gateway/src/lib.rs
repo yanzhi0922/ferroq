@@ -7,6 +7,7 @@
 //! - **Protocol servers** — serve upstream bot frameworks
 //! - **Event bus** — broadcast events from backends to protocol servers
 //! - **Router** — route API calls from protocol servers to the correct backend
+//! - **Plugin engine** — WASM plugin loading and execution
 //! - **OneBot v11 parser** — parse raw OneBot v11 events/actions
 
 pub mod adapter;
@@ -18,6 +19,7 @@ pub mod management;
 pub mod middleware;
 pub mod onebot_v11;
 pub mod onebot_v12;
+pub mod plugin_engine;
 pub mod router;
 pub mod runtime;
 pub mod satori;

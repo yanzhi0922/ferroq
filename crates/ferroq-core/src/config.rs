@@ -27,6 +27,10 @@ pub struct AppConfig {
     #[serde(default)]
     pub dedup: DedupConfig,
 
+    /// WASM plugin configuration.
+    #[serde(default)]
+    pub plugins: Vec<PluginConfig>,
+
     /// Logging settings.
     #[serde(default)]
     pub logging: LoggingConfig,
@@ -272,6 +276,21 @@ impl Default for DedupConfig {
             window_secs: default_dedup_window(),
         }
     }
+}
+
+/// WASM plugin configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginConfig {
+    /// Path to the WASM plugin file.
+    pub path: String,
+
+    /// Whether this plugin is enabled.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// Plugin-specific configuration (passed to plugin on init).
+    #[serde(default)]
+    pub config: serde_json::Value,
 }
 
 /// Logging settings.
