@@ -42,3 +42,4 @@ tokio = { workspace = true, features = ["full", "test-util"] }
 tokio-tungstenite.workspace = true
 reqwest.workspace = true
 chrono.workspace = true
+rand.workspace = true

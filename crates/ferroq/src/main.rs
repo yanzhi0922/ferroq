@@ -125,11 +125,20 @@ async fn main() -> anyhow::Result<()> {
 
     runtime.start().await?;
 
-    // Build the HTTP server (dashboard + protocol servers)
+    // Build the HTTP server (dashboard + management API + protocol servers)
     let stats = runtime.stats().clone();
     let health_stats = stats.clone();
+
+    // Management API routes.
+    let mgmt_router = ferroq_gateway::management::management_routes(
+        runtime.router().clone(),
+        runtime.stats().clone(),
+        runtime.store().clone(),
+    );
+
     let mut app = axum::Router::new()
         .nest("/dashboard", ferroq_web::dashboard_routes())
+        .nest("/api", mgmt_router)
         .route(
             "/health",
             axum::routing::get(move || {
@@ -166,6 +175,13 @@ async fn main() -> anyhow::Result<()> {
     } else {
         None
     };
+
+    // Apply CORS middleware (allow all origins for API).
+    let cors = tower_http::cors::CorsLayer::new()
+        .allow_origin(tower_http::cors::Any)
+        .allow_methods(tower_http::cors::Any)
+        .allow_headers(tower_http::cors::Any);
+    let app = app.layer(cors);
 
     let addr = format!("{}:{}", config.server.host, config.server.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
