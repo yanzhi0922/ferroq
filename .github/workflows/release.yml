@@ -73,6 +73,8 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
 
       - name: Package (Unix)
         if: matrix.os != 'windows-latest'
@@ -119,12 +121,21 @@ jobs:
       - name: List artifacts
         run: find artifacts -type f | sort
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          generate_release_notes: true
-          files: artifacts/*
+      - name: Delete existing release (if any)
+        run: gh release delete "${{ github.ref_name }}" --yes 2>/dev/null || true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        run: |
+          PRERELEASE=""
+          if echo "${{ github.ref_name }}" | grep -q '-'; then
+            PRERELEASE="--prerelease"
+          fi
+          gh release create "${{ github.ref_name }}" \
+            artifacts/* \
+            --title "ferroq ${{ github.ref_name }}" \
+            --generate-notes \
+            $PRERELEASE
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
