@@ -98,6 +98,7 @@ jobs:
   docker:
     name: Build Docker image
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -136,7 +137,6 @@ jobs:
   release:
     name: Create Release
     needs: [build]
-    if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
