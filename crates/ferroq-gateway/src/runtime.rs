@@ -40,7 +40,6 @@ impl GatewayRuntime {
     pub fn new(config: AppConfig) -> Self {
         let bus = Arc::new(EventBus::new());
         let router = Arc::new(ApiRouter::new());
-        let stats = Arc::new(RuntimeStats::new());
 
         // Optionally open message storage.
         let store = if config.storage.enabled {
@@ -57,6 +56,8 @@ impl GatewayRuntime {
         } else {
             None
         };
+
+        let stats = Arc::new(RuntimeStats::with_storage(store.is_some()));
 
         Self {
             config,
@@ -191,6 +192,7 @@ impl GatewayRuntime {
         // Spawn message persistence task if storage is enabled.
         if let Some(ref store) = self.store {
             let store_clone = Arc::clone(store);
+            let stats_clone2 = Arc::clone(&self.stats);
             let mut persist_rx = self.bus.subscribe();
             self.persist_handle = Some(tokio::spawn(async move {
                 let mut stored: u64 = 0;
@@ -200,6 +202,7 @@ impl GatewayRuntime {
                             warn!("failed to persist message: {e}");
                         } else {
                             stored += 1;
+                            stats_clone2.record_message_stored();
                             if stored % 1000 == 0 {
                                 info!(total = stored, "message persistence progress");
                             }

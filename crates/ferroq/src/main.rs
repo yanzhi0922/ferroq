@@ -129,11 +129,14 @@ async fn main() -> anyhow::Result<()> {
     let stats = runtime.stats().clone();
     let health_stats = stats.clone();
 
-    // Management API routes.
-    let mgmt_router = ferroq_gateway::management::management_routes(
-        runtime.router().clone(),
-        runtime.stats().clone(),
-        runtime.store().clone(),
+    // Management API routes — protected by access token middleware.
+    let mgmt_router = ferroq_gateway::middleware::with_auth(
+        ferroq_gateway::management::management_routes(
+            runtime.router().clone(),
+            runtime.stats().clone(),
+            runtime.store().clone(),
+        ),
+        config.server.access_token.clone(),
     );
 
     let mut app = axum::Router::new()
@@ -181,7 +184,15 @@ async fn main() -> anyhow::Result<()> {
         .allow_origin(tower_http::cors::Any)
         .allow_methods(tower_http::cors::Any)
         .allow_headers(tower_http::cors::Any);
-    let app = app.layer(cors);
+
+    // HTTP request/response tracing.
+    let trace_layer = tower_http::trace::TraceLayer::new_for_http()
+        .make_span_with(tower_http::trace::DefaultMakeSpan::new().level(tracing::Level::INFO))
+        .on_response(
+            tower_http::trace::DefaultOnResponse::new().level(tracing::Level::INFO),
+        );
+
+    let app = app.layer(cors).layer(trace_layer);
 
     let addr = format!("{}:{}", config.server.host, config.server.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;

@@ -103,6 +103,14 @@ const DASHBOARD_HTML: &str = r##"<!DOCTYPE html>
       <div class="label">WS Connections</div>
       <div class="value" id="ws-conns">0</div>
     </div>
+    <div class="stat-card">
+      <div class="label">Messages Stored</div>
+      <div class="value" id="msgs-stored">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Storage</div>
+      <div class="value" id="storage-status" style="font-size:1.2em">-</div>
+    </div>
   </div>
 
   <div style="display: flex; align-items: center; margin-bottom: 12px;">
@@ -153,6 +161,9 @@ async function refresh() {
     document.getElementById('events').textContent = formatNumber(data.events_total);
     document.getElementById('api-calls').textContent = formatNumber(data.api_calls_total);
     document.getElementById('ws-conns').textContent = data.ws_connections;
+    document.getElementById('msgs-stored').textContent = formatNumber(data.messages_stored);
+    document.getElementById('storage-status').textContent = data.storage_enabled ? 'Enabled' : 'Disabled';
+    document.getElementById('storage-status').style.color = data.storage_enabled ? 'var(--green)' : 'var(--text-dim)';
 
     const tbody = document.getElementById('adapters-body');
     if (data.adapters.length === 0) {

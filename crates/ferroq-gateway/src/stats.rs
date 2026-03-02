@@ -20,6 +20,10 @@ pub struct RuntimeStats {
     pub api_calls_total: AtomicU64,
     /// Total active WS connections (forward WS clients).
     pub ws_connections: AtomicU64,
+    /// Total messages persisted to storage.
+    pub messages_stored: AtomicU64,
+    /// Whether message storage is enabled.
+    storage_enabled: bool,
     /// Adapter status snapshots.
     adapters: RwLock<Vec<AdapterSnapshot>>,
 }
@@ -43,16 +47,25 @@ pub struct HealthResponse {
     pub events_total: u64,
     pub api_calls_total: u64,
     pub ws_connections: u64,
+    pub messages_stored: u64,
+    pub storage_enabled: bool,
     pub adapters: Vec<AdapterSnapshot>,
 }
 
 impl RuntimeStats {
     pub fn new() -> Self {
+        Self::with_storage(false)
+    }
+
+    /// Create stats with storage-enabled flag.
+    pub fn with_storage(storage_enabled: bool) -> Self {
         Self {
             start_time: Instant::now(),
             events_total: AtomicU64::new(0),
             api_calls_total: AtomicU64::new(0),
             ws_connections: AtomicU64::new(0),
+            messages_stored: AtomicU64::new(0),
+            storage_enabled,
             adapters: RwLock::new(Vec::new()),
         }
     }
@@ -77,6 +90,11 @@ impl RuntimeStats {
         self.ws_connections.fetch_sub(1, Ordering::Relaxed);
     }
 
+    /// Record a stored message.
+    pub fn record_message_stored(&self) {
+        self.messages_stored.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Update the adapter snapshots.
     pub fn update_adapters(&self, snapshots: Vec<AdapterSnapshot>) {
         *self.adapters.write() = snapshots;
@@ -91,6 +109,8 @@ impl RuntimeStats {
             events_total: self.events_total.load(Ordering::Relaxed),
             api_calls_total: self.api_calls_total.load(Ordering::Relaxed),
             ws_connections: self.ws_connections.load(Ordering::Relaxed),
+            messages_stored: self.messages_stored.load(Ordering::Relaxed),
+            storage_enabled: self.storage_enabled,
             adapters: self.adapters.read().clone(),
         }
     }

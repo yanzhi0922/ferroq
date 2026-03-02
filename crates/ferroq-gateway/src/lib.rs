@@ -12,6 +12,7 @@
 pub mod adapter;
 pub mod bus;
 pub mod management;
+pub mod middleware;
 pub mod onebot_v11;
 pub mod router;
 pub mod runtime;
