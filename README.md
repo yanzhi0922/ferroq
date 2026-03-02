@@ -24,7 +24,9 @@ Instead of reimplementing the QQ protocol, ferroq acts as a **unified proxy / ro
 - 🔌 **Backend agnostic** — Lagrange.OneBot, NapCat — hot-swap without restarting
 - 📊 **Built-in dashboard** — web UI for monitoring adapters, per-adapter event/API metrics
 - 🛡️ **Reliability** — exponential backoff reconnect, health checks, configurable timeouts
-- 💾 **Message storage** — optional SQLite-based message persistence with search & pagination
+- � **Failover** — automatic primary/fallback adapter switching on connection errors
+- 🧹 **Event deduplication** — time-windowed fingerprint filter, prevents duplicates from failover
+- �💾 **Message storage** — optional SQLite-based message persistence with search & pagination
 - 🔒 **Security** — Bearer / query-param auth, HMAC-SHA1 HTTP POST signing, secret redaction
 - ⚡ **Hot reload** — `POST /api/reload` updates access token and rate-limit params without restart
 - 📈 **Observability** — Prometheus `/metrics`, per-adapter event/API counters, health API
@@ -157,6 +159,8 @@ See [config.example.yaml](config.example.yaml) for the full configuration refere
 - [x] **Phase 3.5** — Exponential backoff reconnect + per-adapter counters + configurable timeouts
 - [x] **Phase 3.6** — Per-adapter API metrics + route_named + dashboard columns + Retry-After
 - [x] **Phase 3.7** — Management API tests + testing hardening + documentation
+- [x] **Phase 3.8** — Failover adapters + adapter type accuracy
+- [x] **Phase 3.9** — Event deduplication + reverse WS exponential backoff
 - [ ] **Phase 4** — Multi-account routing + failover + NapCat adapter
 - [ ] **Phase 5** — OneBot v12 / Milky / Satori protocol servers
 - [ ] **Phase 6** — Plugin system + benchmarks + release
@@ -189,7 +193,7 @@ ferroq/
 ## Testing
 
 ```bash
-# Run all tests (57 total: 16 core + 36 gateway + 5 integration)
+# Run all tests (73 total: 16 core + 52 gateway + 5 integration)
 cargo test --workspace
 
 # Run with clippy

@@ -25,6 +25,8 @@ pub struct RuntimeStats {
     pub ws_connections_total: AtomicU64,
     /// Total messages persisted to storage.
     pub messages_stored: AtomicU64,
+    /// Total duplicate events suppressed.
+    pub events_deduplicated: AtomicU64,
     /// Whether message storage is enabled.
     storage_enabled: bool,
     /// Adapter status snapshots.
@@ -62,6 +64,7 @@ pub struct HealthResponse {
     pub version: &'static str,
     pub uptime_secs: u64,
     pub events_total: u64,
+    pub events_deduplicated: u64,
     pub api_calls_total: u64,
     pub ws_connections: u64,
     pub ws_connections_total: u64,
@@ -86,6 +89,7 @@ impl RuntimeStats {
             ws_connections: AtomicU64::new(0),
             ws_connections_total: AtomicU64::new(0),
             messages_stored: AtomicU64::new(0),
+            events_deduplicated: AtomicU64::new(0),
             storage_enabled,
             adapters: RwLock::new(Vec::new()),
             per_adapter_events: RwLock::new(HashMap::new()),
@@ -133,6 +137,11 @@ impl RuntimeStats {
         self.messages_stored.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Record a duplicated event that was suppressed.
+    pub fn record_event_deduplicated(&self) {
+        self.events_deduplicated.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Update the adapter snapshots.
     pub fn update_adapters(&self, snapshots: Vec<AdapterSnapshot>) {
         *self.adapters.write() = snapshots;
@@ -160,6 +169,7 @@ impl RuntimeStats {
             version: env!("CARGO_PKG_VERSION"),
             uptime_secs: self.start_time.elapsed().as_secs(),
             events_total: self.events_total.load(Ordering::Relaxed),
+            events_deduplicated: self.events_deduplicated.load(Ordering::Relaxed),
             api_calls_total: self.api_calls_total.load(Ordering::Relaxed),
             ws_connections: self.ws_connections.load(Ordering::Relaxed),
             ws_connections_total: self.ws_connections_total.load(Ordering::Relaxed),
@@ -197,6 +207,10 @@ impl RuntimeStats {
         out.push_str("# HELP ferroq_events_total Total events forwarded through the bus.\n");
         out.push_str("# TYPE ferroq_events_total counter\n");
         out.push_str(&format!("ferroq_events_total {}\n\n", health.events_total));
+
+        out.push_str("# HELP ferroq_events_deduplicated_total Total duplicate events suppressed.\n");
+        out.push_str("# TYPE ferroq_events_deduplicated_total counter\n");
+        out.push_str(&format!("ferroq_events_deduplicated_total {}\n\n", health.events_deduplicated));
 
         out.push_str("# HELP ferroq_api_calls_total Total API calls routed.\n");
         out.push_str("# TYPE ferroq_api_calls_total counter\n");

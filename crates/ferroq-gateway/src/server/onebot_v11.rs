@@ -369,6 +369,11 @@ async fn reverse_ws_task(
 ) {
     info!(url = %target.url, "starting reverse WS connection");
 
+    // Exponential backoff: 5s → 10s → 20s → … capped at 120s.
+    let base_interval: u64 = 5;
+    let max_interval: u64 = 120;
+    let mut current_interval = base_interval;
+
     loop {
         // Build request with auth header (reads token from SharedConfig each attempt).
         let access_token = shared_config.access_token();
@@ -376,7 +381,8 @@ async fn reverse_ws_task(
             Ok(r) => r,
             Err(e) => {
                 error!(url = %target.url, error = %e, "failed to build reverse WS request");
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(current_interval)).await;
+                current_interval = (current_interval * 2).min(max_interval);
                 continue;
             }
         };
@@ -384,6 +390,8 @@ async fn reverse_ws_task(
         match tokio_tungstenite::connect_async(request).await {
             Ok((ws_stream, _)) => {
                 info!(url = %target.url, "reverse WS connected");
+                // Reset backoff on successful connection.
+                current_interval = base_interval;
                 let (ws_tx, mut ws_rx) = ws_stream.split();
 
                 // Fresh event subscription for this connection.
@@ -442,14 +450,15 @@ async fn reverse_ws_task(
 
                 push_task.abort();
                 writer_task.abort();
-                warn!(url = %target.url, "reverse WS disconnected, reconnecting in 5s");
+                warn!(url = %target.url, retry_secs = current_interval, "reverse WS disconnected, reconnecting");
             }
             Err(e) => {
-                error!(url = %target.url, error = %e, "reverse WS connect failed, retrying in 5s");
+                error!(url = %target.url, error = %e, retry_secs = current_interval, "reverse WS connect failed");
             }
         }
 
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(current_interval)).await;
+        current_interval = (current_interval * 2).min(max_interval);
     }
 }
 

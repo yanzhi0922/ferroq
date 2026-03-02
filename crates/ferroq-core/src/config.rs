@@ -23,6 +23,10 @@ pub struct AppConfig {
     #[serde(default)]
     pub storage: StorageConfig,
 
+    /// Event deduplication settings.
+    #[serde(default)]
+    pub dedup: DedupConfig,
+
     /// Logging settings.
     #[serde(default)]
     pub logging: LoggingConfig,
@@ -232,6 +236,28 @@ impl Default for StorageConfig {
     }
 }
 
+/// Event deduplication settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DedupConfig {
+    /// Whether deduplication is enabled (recommended when using failover).
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// Time window in seconds — events with the same fingerprint within this
+    /// window are considered duplicates.
+    #[serde(default = "default_dedup_window")]
+    pub window_secs: u64,
+}
+
+impl Default for DedupConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            window_secs: default_dedup_window(),
+        }
+    }
+}
+
 /// Logging settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoggingConfig {
@@ -299,6 +325,10 @@ fn default_max_days() -> u32 {
 
 fn default_log_level() -> String {
     "info".to_string()
+}
+
+fn default_dedup_window() -> u64 {
+    60
 }
 
 fn default_rps() -> u32 {

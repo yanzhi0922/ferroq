@@ -84,6 +84,16 @@ storage:
   path: "./data/messages.db"
   max_days: 30
 
+# Event deduplication — prevents duplicate events when failover is active.
+# When both primary and fallback adapters are connected, they may push the same
+# event. The dedup filter keeps a time-windowed set of fingerprints and drops
+# duplicates before they reach the event bus.
+dedup:
+  enabled: true
+  # Time window in seconds — events with the same fingerprint within this
+  # window are considered duplicates.
+  window_secs: 60
+
 # Logging
 logging:
   # Log level: trace, debug, info, warn, error

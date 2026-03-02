@@ -12,6 +12,7 @@ use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
 use crate::bus::EventBus;
+use crate::dedup::DedupFilter;
 use crate::router::ApiRouter;
 use crate::stats::{AdapterSnapshot, RuntimeStats};
 use crate::storage::MessageStore;
@@ -23,6 +24,7 @@ pub struct GatewayRuntime {
     router: Arc<ApiRouter>,
     stats: Arc<RuntimeStats>,
     store: Option<Arc<MessageStore>>,
+    dedup: Option<Arc<DedupFilter>>,
     adapters: Vec<Arc<dyn BackendAdapter>>,
     servers: Vec<Box<dyn ProtocolServer>>,
     /// Handles for the event forwarding tasks (adapter → bus).
@@ -59,12 +61,21 @@ impl GatewayRuntime {
 
         let stats = Arc::new(RuntimeStats::with_storage(store.is_some()));
 
+        // Event deduplication filter — enabled by default, crucial for failover.
+        let dedup = if config.dedup.enabled {
+            info!(window_secs = config.dedup.window_secs, "event deduplication enabled");
+            Some(Arc::new(DedupFilter::new(config.dedup.window_secs)))
+        } else {
+            None
+        };
+
         Self {
             config,
             bus,
             router,
             stats,
             store,
+            dedup,
             adapters: Vec::new(),
             servers: Vec::new(),
             forward_handles: Vec::new(),
@@ -142,8 +153,9 @@ impl GatewayRuntime {
             // Spawn a task that forwards events from this adapter to the bus.
             let bus = Arc::clone(&self.bus);
             let stats = Arc::clone(&self.stats);
+            let dedup = self.dedup.clone();
             let adapter_name = adapter.info().name.clone();
-            let handle = tokio::spawn(Self::forward_events(event_rx, bus, stats, adapter_name));
+            let handle = tokio::spawn(Self::forward_events(event_rx, bus, stats, dedup, adapter_name));
             self.forward_handles.push(handle);
         }
 
@@ -251,10 +263,18 @@ impl GatewayRuntime {
         mut event_rx: mpsc::UnboundedReceiver<Event>,
         bus: Arc<EventBus>,
         stats: Arc<RuntimeStats>,
+        dedup: Option<Arc<DedupFilter>>,
         adapter_name: String,
     ) {
         let mut count: u64 = 0;
         while let Some(event) = event_rx.recv().await {
+            // Deduplication check — drop if this event was already seen.
+            if let Some(ref filter) = dedup {
+                if filter.is_duplicate(&event) {
+                    stats.record_event_deduplicated();
+                    continue;
+                }
+            }
             count += 1;
             stats.record_event_for(&adapter_name);
             if count % 1000 == 0 {
