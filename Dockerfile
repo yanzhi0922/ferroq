@@ -5,11 +5,12 @@
 # Multi-stage build for minimal image size (~20MB)
 # ============================================================================
 
-# Stage 1: Build
-FROM rust:alpine AS builder
+# Stage 1: Build (use bookworm for Rust 1.85+ support)
+FROM rust:1-bookworm AS builder
 
-# Install build dependencies
-RUN apk add --no-cache musl-dev
+# Install musl target for static linking
+RUN apt-get update && apt-get install -y musl-tools && rm -rf /var/lib/apt/lists/*
+RUN rustup target add x86_64-unknown-linux-musl
 
 WORKDIR /app
 
@@ -28,7 +29,7 @@ RUN mkdir -p crates/ferroq-core/src crates/ferroq-gateway/src crates/ferroq-web/
     echo "fn main() {}" > crates/ferroq/src/main.rs
 
 # Build dependencies only (cached layer)
-RUN cargo build --release --package ferroq 2>/dev/null || true
+RUN cargo build --release --target x86_64-unknown-linux-musl --package ferroq 2>/dev/null || true
 
 # Copy actual source code
 COPY crates/ crates/
@@ -40,7 +41,7 @@ RUN touch crates/ferroq-core/src/lib.rs \
           crates/ferroq/src/main.rs
 
 # Build the release binary
-RUN cargo build --release --package ferroq
+RUN cargo build --release --target x86_64-unknown-linux-musl --package ferroq
 
 # Stage 2: Runtime
 FROM alpine:3.20
@@ -54,7 +55,7 @@ RUN addgroup -S ferroq && adduser -S ferroq -G ferroq
 WORKDIR /app
 
 # Copy binary from builder
-COPY --from=builder /app/target/release/ferroq /usr/local/bin/ferroq
+COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/ferroq /usr/local/bin/ferroq
 
 # Copy default config
 COPY config.example.yaml /app/config.example.yaml
