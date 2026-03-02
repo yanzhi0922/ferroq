@@ -161,7 +161,7 @@ async fn main() -> anyhow::Result<()> {
         runtime.add_adapter(adapter);
     }
 
-    // TODO: Phase 1.4 — instantiate protocol servers based on config
+    // Protocol servers are instantiated below based on config.
 
     runtime.start().await?;
 

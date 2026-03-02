@@ -90,3 +90,118 @@ impl Default for ApiRouter {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use ferroq_core::adapter::{AdapterInfo, AdapterState, BackendAdapter};
+    use ferroq_core::api::{ApiRequest, ApiResponse};
+    use ferroq_core::error::GatewayError;
+    use ferroq_core::event::Event;
+    use tokio::sync::mpsc;
+
+    /// A minimal mock adapter for router tests.
+    struct MockAdapter {
+        name: String,
+        self_id: Option<i64>,
+    }
+
+    impl MockAdapter {
+        fn new(name: &str, self_id: Option<i64>) -> Arc<Self> {
+            Arc::new(Self {
+                name: name.to_string(),
+                self_id,
+            })
+        }
+    }
+
+    #[async_trait]
+    impl BackendAdapter for MockAdapter {
+        fn info(&self) -> AdapterInfo {
+            AdapterInfo {
+                name: self.name.clone(),
+                backend_type: "mock".to_string(),
+                url: "ws://mock".to_string(),
+                state: AdapterState::Connected,
+                self_id: self.self_id,
+            }
+        }
+        async fn connect(&self, _tx: mpsc::UnboundedSender<Event>) -> Result<(), GatewayError> {
+            Ok(())
+        }
+        async fn disconnect(&self) -> Result<(), GatewayError> {
+            Ok(())
+        }
+        async fn call_api(&self, _req: ApiRequest) -> Result<ApiResponse, GatewayError> {
+            Ok(ApiResponse {
+                status: "ok".to_string(),
+                retcode: 0,
+                data: serde_json::json!({ "adapter": self.name }),
+                message: String::new(),
+                echo: None,
+            })
+        }
+        async fn health_check(&self) -> bool {
+            true
+        }
+    }
+
+    #[tokio::test]
+    async fn associate_self_id_routes_correctly() {
+        let router = ApiRouter::new();
+
+        // Register two adapters, neither knows their self_id yet.
+        let a1 = MockAdapter::new("bot-a", None);
+        let a2 = MockAdapter::new("bot-b", None);
+        router.register(a1 as Arc<dyn BackendAdapter>);
+        router.register(a2 as Arc<dyn BackendAdapter>);
+
+        // Without self_id, requests go to the default (index 0 = bot-a).
+        let resp = router
+            .route(ApiRequest {
+                action: "test".into(),
+                params: serde_json::Value::Null,
+                echo: None,
+                self_id: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(resp.data["adapter"], "bot-a");
+
+        // Now dynamically associate self_id 99 with adapter index 1 (bot-b).
+        router.associate_self_id(99, 1);
+
+        // Request with self_id=99 should now route to bot-b.
+        let resp = router
+            .route(ApiRequest {
+                action: "test".into(),
+                params: serde_json::Value::Null,
+                echo: None,
+                self_id: Some(99),
+            })
+            .await
+            .unwrap();
+        assert_eq!(resp.data["adapter"], "bot-b");
+    }
+
+    #[tokio::test]
+    async fn register_with_known_self_id() {
+        let router = ApiRouter::new();
+
+        // Adapter already knows its self_id at registration time.
+        let a = MockAdapter::new("known-bot", Some(42));
+        router.register(a as Arc<dyn BackendAdapter>);
+
+        let resp = router
+            .route(ApiRequest {
+                action: "test".into(),
+                params: serde_json::Value::Null,
+                echo: None,
+                self_id: Some(42),
+            })
+            .await
+            .unwrap();
+        assert_eq!(resp.data["adapter"], "known-bot");
+    }
+}

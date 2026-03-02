@@ -38,6 +38,9 @@ async fn adapter_receives_events_from_mock_backend() {
         format!("ws://{}/onebot/v11/ws", addr),
         "",
         5,
+        120,
+        30,
+        15,
         30,
     );
 
@@ -74,6 +77,9 @@ async fn adapter_call_api_roundtrip() {
         format!("ws://{}/onebot/v11/ws", addr),
         "",
         5,
+        120,
+        30,
+        15,
         30,
     );
 
@@ -119,6 +125,9 @@ async fn full_pipeline_http_api() {
         format!("ws://{}/onebot/v11/ws", backend_addr),
         "",
         5,
+        120,
+        30,
+        15,
         30,
     ));
 
@@ -192,6 +201,9 @@ async fn events_propagate_through_bus() {
         format!("ws://{}/onebot/v11/ws", backend_addr),
         "",
         5,
+        120,
+        30,
+        15,
         30,
     );
 
@@ -238,6 +250,9 @@ async fn forward_ws_receives_events() {
         format!("ws://{}/onebot/v11/ws", backend_addr),
         "",
         5,
+        120,
+        30,
+        15,
         30,
     ));
 

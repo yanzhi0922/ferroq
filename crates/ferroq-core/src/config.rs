@@ -116,13 +116,25 @@ pub struct BackendConfig {
     #[serde(default)]
     pub access_token: String,
 
-    /// Reconnect interval in seconds.
+    /// Base reconnect interval in seconds (used as minimum for exponential backoff).
     #[serde(default = "default_reconnect_interval")]
     pub reconnect_interval: u64,
+
+    /// Maximum reconnect interval in seconds (backoff cap).
+    #[serde(default = "default_max_reconnect_interval")]
+    pub max_reconnect_interval: u64,
 
     /// Health check interval in seconds.
     #[serde(default = "default_health_check_interval")]
     pub health_check_interval: u64,
+
+    /// WebSocket connect timeout in seconds.
+    #[serde(default = "default_connect_timeout")]
+    pub connect_timeout: u64,
+
+    /// API call response timeout in seconds.
+    #[serde(default = "default_api_timeout")]
+    pub api_timeout: u64,
 }
 
 /// Protocol output configuration.
@@ -261,7 +273,19 @@ fn default_reconnect_interval() -> u64 {
     5
 }
 
+fn default_max_reconnect_interval() -> u64 {
+    120
+}
+
 fn default_health_check_interval() -> u64 {
+    30
+}
+
+fn default_connect_timeout() -> u64 {
+    15
+}
+
+fn default_api_timeout() -> u64 {
     30
 }
 
@@ -312,5 +336,34 @@ accounts:
         assert_eq!(config.host, "0.0.0.0");
         assert_eq!(config.port, 8080);
         assert!(config.dashboard);
+    }
+
+    #[test]
+    fn backend_config_defaults() {
+        let yaml = r#"
+type: lagrange
+url: "ws://localhost:8081"
+"#;
+        let cfg: BackendConfig = serde_yaml::from_str(yaml).expect("parse backend config");
+        assert_eq!(cfg.reconnect_interval, 5);
+        assert_eq!(cfg.max_reconnect_interval, 120);
+        assert_eq!(cfg.health_check_interval, 30);
+        assert_eq!(cfg.connect_timeout, 15);
+        assert_eq!(cfg.api_timeout, 30);
+    }
+
+    #[test]
+    fn backend_config_custom_timeouts() {
+        let yaml = r#"
+type: lagrange
+url: "ws://localhost:8081"
+connect_timeout: 10
+api_timeout: 60
+max_reconnect_interval: 300
+"#;
+        let cfg: BackendConfig = serde_yaml::from_str(yaml).expect("parse backend config");
+        assert_eq!(cfg.connect_timeout, 10);
+        assert_eq!(cfg.api_timeout, 60);
+        assert_eq!(cfg.max_reconnect_interval, 300);
     }
 }

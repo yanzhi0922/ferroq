@@ -147,17 +147,25 @@ impl GatewayRuntime {
             self.forward_handles.push(handle);
         }
 
-        // Spawn periodic stats refresher + health checker (every 5s).
+        // Spawn periodic stats refresher + health checker + dynamic self_id association (every 5s).
         let adapters_for_stats: Vec<Arc<dyn BackendAdapter>> =
             self.adapters.iter().map(Arc::clone).collect();
         let stats_clone = Arc::clone(&self.stats);
+        let router_clone = Arc::clone(&self.router);
         self.stats_handle = Some(tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
             loop {
                 interval.tick().await;
                 let mut snapshots = Vec::with_capacity(adapters_for_stats.len());
-                for a in &adapters_for_stats {
+                for (index, a) in adapters_for_stats.iter().enumerate() {
                     let info = a.info();
+
+                    // Dynamic self_id → router association.
+                    // If the adapter now knows its self_id, update the routing table.
+                    if let Some(self_id) = info.self_id {
+                        router_clone.associate_self_id(self_id, index);
+                    }
+
                     let start = std::time::Instant::now();
                     let healthy = a.health_check().await;
                     let latency = start.elapsed().as_millis() as u64;
@@ -244,7 +252,7 @@ impl GatewayRuntime {
         let mut count: u64 = 0;
         while let Some(event) = event_rx.recv().await {
             count += 1;
-            stats.record_event();
+            stats.record_event_for(&adapter_name);
             if count % 1000 == 0 {
                 info!(
                     adapter = %adapter_name,

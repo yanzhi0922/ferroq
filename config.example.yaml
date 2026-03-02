@@ -26,10 +26,16 @@ accounts:
       url: "ws://127.0.0.1:8081/onebot/v11/ws"
       # Access token for the backend
       access_token: ""
-      # Reconnect interval in seconds
+      # Reconnect interval in seconds (base for exponential backoff)
       reconnect_interval: 5
+      # Maximum reconnect interval in seconds (backoff cap)
+      max_reconnect_interval: 120
       # Health check interval in seconds
       health_check_interval: 30
+      # WebSocket connect timeout in seconds
+      connect_timeout: 15
+      # API call response timeout in seconds
+      api_timeout: 30
 
     # Optional fallback backend (for failover)
     # fallback:

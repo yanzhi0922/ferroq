@@ -54,6 +54,9 @@ pub struct LagrangeAdapter {
     url: String,
     access_token: String,
     reconnect_interval: Duration,
+    max_reconnect_interval: Duration,
+    connect_timeout: Duration,
+    api_timeout: Duration,
     #[allow(dead_code)]
     health_check_interval: Duration,
     inner: Arc<Mutex<Inner>>,
@@ -67,13 +70,19 @@ impl LagrangeAdapter {
         url: impl Into<String>,
         access_token: impl Into<String>,
         reconnect_interval_secs: u64,
+        max_reconnect_interval_secs: u64,
         health_check_interval_secs: u64,
+        connect_timeout_secs: u64,
+        api_timeout_secs: u64,
     ) -> Self {
         Self {
             name: name.into(),
             url: url.into(),
             access_token: access_token.into(),
             reconnect_interval: Duration::from_secs(reconnect_interval_secs),
+            max_reconnect_interval: Duration::from_secs(max_reconnect_interval_secs),
+            connect_timeout: Duration::from_secs(connect_timeout_secs),
+            api_timeout: Duration::from_secs(api_timeout_secs),
             health_check_interval: Duration::from_secs(health_check_interval_secs),
             inner: Arc::new(Mutex::new(Inner {
                 state: AdapterState::Disconnected,
@@ -99,7 +108,10 @@ impl LagrangeAdapter {
             &cfg.url,
             &cfg.access_token,
             cfg.reconnect_interval,
+            cfg.max_reconnect_interval,
             cfg.health_check_interval,
+            cfg.connect_timeout,
+            cfg.api_timeout,
         )
     }
 
@@ -134,14 +146,15 @@ impl LagrangeAdapter {
         GatewayError,
     > {
         let request = self.build_request()?;
-        info!(url = %self.url, name = %self.name, "connecting to Lagrange backend");
+        let timeout = self.connect_timeout;
+        info!(url = %self.url, name = %self.name, timeout_secs = timeout.as_secs(), "connecting to Lagrange backend");
 
         let (ws_stream, _response) = tokio::time::timeout(
-            Duration::from_secs(15),
+            timeout,
             connect_async(request),
         )
         .await
-        .map_err(|_| GatewayError::Connection("websocket connect timed out after 15s".to_string()))?
+        .map_err(|_| GatewayError::Connection(format!("websocket connect timed out after {}s", timeout.as_secs())))?
         .map_err(|e| GatewayError::Connection(format!("websocket connect failed: {e}")))?;
 
         info!(url = %self.url, name = %self.name, "connected to Lagrange backend");
@@ -158,6 +171,8 @@ impl LagrangeAdapter {
         let name = self.name.clone();
         let url = self.url.clone();
         let reconnect_interval = self.reconnect_interval;
+        let max_reconnect_interval = self.max_reconnect_interval;
+        let connect_timeout = self.connect_timeout;
 
         // Writer task: takes messages from the channel and writes to WS.
         let (ws_writer_tx, ws_writer_rx) = mpsc::unbounded_channel::<WsMessage>();
@@ -181,19 +196,12 @@ impl LagrangeAdapter {
 
         // Spawn a monitor task that detects reader/writer exit and triggers reconnect.
         let inner_monitor = Arc::clone(&self.inner);
-        let adapter_url = url.clone();
         let adapter_name = name.clone();
         let adapter_access_token = self.access_token.clone();
         let adapter_inner = Arc::clone(&self.inner);
 
         // We need self reference for reconnect. Clone relevant fields.
         let reconnect_handle = tokio::spawn(async move {
-            // Wait for the reader to end (= connection lost).
-            let _reader_h = {
-                let g = inner_monitor.lock();
-                g.reader_handle.as_ref().map(|h| h.abort_handle())
-            };
-
             // Wait by polling state — we check every second.
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
@@ -203,7 +211,7 @@ impl LagrangeAdapter {
                 }
             }
 
-            // The reader is done. Attempt reconnect loop.
+            // The reader is done. Attempt reconnect loop with exponential backoff + jitter.
             info!(name = %adapter_name, "connection lost, starting reconnect loop");
             {
                 let mut g = adapter_inner.lock();
@@ -211,23 +219,35 @@ impl LagrangeAdapter {
                 g.ws_writer_tx = None;
             }
 
+            let base_interval = reconnect_interval.as_secs_f64();
+            let max_interval = max_reconnect_interval.as_secs_f64();
+            let mut attempt: u32 = 0;
+
             loop {
+                // Exponential backoff: base * 2^attempt, capped at max_interval.
+                let backoff = (base_interval * 2.0_f64.powi(attempt as i32)).min(max_interval);
+                // Add jitter: random value in [0, backoff * 0.3].
+                let jitter = rand::random::<f64>() * backoff * 0.3;
+                let delay = Duration::from_secs_f64(backoff + jitter);
+
                 info!(
                     name = %adapter_name,
-                    url = %adapter_url,
-                    delay_secs = reconnect_interval.as_secs(),
+                    url = %url,
+                    attempt = attempt + 1,
+                    delay_secs = format!("{:.1}", delay.as_secs_f64()),
                     "attempting reconnect"
                 );
-                tokio::time::sleep(reconnect_interval).await;
+                tokio::time::sleep(delay).await;
 
                 // Try to connect.
-                let mut request = match adapter_url
+                let mut request = match url
                     .as_str()
                     .into_client_request()
                 {
                     Ok(r) => r,
                     Err(e) => {
                         error!(name = %adapter_name, "invalid url on reconnect: {e}");
+                        attempt = attempt.saturating_add(1);
                         continue;
                     }
                 };
@@ -239,11 +259,11 @@ impl LagrangeAdapter {
                 }
 
                 match tokio::time::timeout(
-                    Duration::from_secs(15),
+                    connect_timeout,
                     connect_async(request),
                 ).await {
                     Ok(Ok((ws_stream, _))) => {
-                        info!(name = %adapter_name, "reconnected to Lagrange backend");
+                        info!(name = %adapter_name, attempts = attempt + 1, "reconnected to Lagrange backend");
                         let (ws_w, ws_r) = ws_stream.split();
 
                         let (tx, rx) = mpsc::unbounded_channel::<WsMessage>();
@@ -262,12 +282,14 @@ impl LagrangeAdapter {
                         break;
                     }
                     Ok(Err(e)) => {
-                        warn!(name = %adapter_name, "reconnect failed: {e}");
+                        warn!(name = %adapter_name, attempt = attempt + 1, "reconnect failed: {e}");
                     }
                     Err(_) => {
-                        warn!(name = %adapter_name, "reconnect timed out after 15s");
+                        warn!(name = %adapter_name, attempt = attempt + 1, timeout_secs = connect_timeout.as_secs(), "reconnect timed out");
                     }
                 }
+
+                attempt = attempt.saturating_add(1);
             }
         });
 
@@ -514,8 +536,9 @@ impl BackendAdapter for LagrangeAdapter {
             }
         }
 
-        // Wait for the response with a timeout.
-        match tokio::time::timeout(Duration::from_secs(30), resp_rx).await {
+        // Wait for the response with a configurable timeout.
+        let timeout = self.api_timeout;
+        match tokio::time::timeout(timeout, resp_rx).await {
             Ok(Ok(response)) => Ok(response),
             Ok(Err(_)) => Err(GatewayError::Connection(
                 "API response channel dropped (connection lost?)".to_string(),
@@ -525,8 +548,8 @@ impl BackendAdapter for LagrangeAdapter {
                 let mut guard = self.inner.lock();
                 guard.pending_calls.remove(&echo);
                 Err(GatewayError::Connection(format!(
-                    "API call '{}' timed out after 30s",
-                    request.action
+                    "API call '{}' timed out after {}s",
+                    request.action, timeout.as_secs()
                 )))
             }
         }

@@ -3,6 +3,7 @@
 //! These types are collected by the runtime and served via the
 //! `/health` and `/api/status` HTTP endpoints.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -28,6 +29,10 @@ pub struct RuntimeStats {
     storage_enabled: bool,
     /// Adapter status snapshots.
     adapters: RwLock<Vec<AdapterSnapshot>>,
+    /// Per-adapter event counts (adapter_name → count).
+    per_adapter_events: RwLock<HashMap<String, u64>>,
+    /// Per-adapter API call counts (adapter_name → count).
+    per_adapter_api_calls: RwLock<HashMap<String, u64>>,
 }
 
 /// A snapshot of adapter status at a point in time.
@@ -79,17 +84,33 @@ impl RuntimeStats {
             messages_stored: AtomicU64::new(0),
             storage_enabled,
             adapters: RwLock::new(Vec::new()),
+            per_adapter_events: RwLock::new(HashMap::new()),
+            per_adapter_api_calls: RwLock::new(HashMap::new()),
         }
     }
 
-    /// Record a forwarded event.
+    /// Record a forwarded event (global counter).
     pub fn record_event(&self) {
         self.events_total.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Record a routed API call.
+    /// Record a forwarded event from a specific adapter.
+    pub fn record_event_for(&self, adapter_name: &str) {
+        self.events_total.fetch_add(1, Ordering::Relaxed);
+        let mut map = self.per_adapter_events.write();
+        *map.entry(adapter_name.to_string()).or_insert(0) += 1;
+    }
+
+    /// Record a routed API call (global counter).
     pub fn record_api_call(&self) {
         self.api_calls_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a routed API call for a specific adapter.
+    pub fn record_api_call_for(&self, adapter_name: &str) {
+        self.api_calls_total.fetch_add(1, Ordering::Relaxed);
+        let mut map = self.per_adapter_api_calls.write();
+        *map.entry(adapter_name.to_string()).or_insert(0) += 1;
     }
 
     /// Increment active WS connections.
@@ -214,6 +235,81 @@ impl RuntimeStats {
             out.push('\n');
         }
 
+        // -- Per-adapter event counters --
+        let events_map = self.per_adapter_events.read();
+        if !events_map.is_empty() {
+            out.push_str("# HELP ferroq_adapter_events_total Events forwarded per adapter.\n");
+            out.push_str("# TYPE ferroq_adapter_events_total counter\n");
+            for (name, count) in events_map.iter() {
+                out.push_str(&format!(
+                    "ferroq_adapter_events_total{{name=\"{}\"}} {}\n",
+                    name, count
+                ));
+            }
+            out.push('\n');
+        }
+
+        // -- Per-adapter API call counters --
+        let api_map = self.per_adapter_api_calls.read();
+        if !api_map.is_empty() {
+            out.push_str("# HELP ferroq_adapter_api_calls_total API calls routed per adapter.\n");
+            out.push_str("# TYPE ferroq_adapter_api_calls_total counter\n");
+            for (name, count) in api_map.iter() {
+                out.push_str(&format!(
+                    "ferroq_adapter_api_calls_total{{name=\"{}\"}} {}\n",
+                    name, count
+                ));
+            }
+            out.push('\n');
+        }
+
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn per_adapter_event_counters() {
+        let stats = RuntimeStats::new();
+        stats.record_event_for("adapter-a");
+        stats.record_event_for("adapter-a");
+        stats.record_event_for("adapter-b");
+
+        // Global counter should reflect all events.
+        assert_eq!(stats.events_total.load(Ordering::Relaxed), 3);
+
+        // Per-adapter counters.
+        let map = stats.per_adapter_events.read();
+        assert_eq!(*map.get("adapter-a").unwrap(), 2);
+        assert_eq!(*map.get("adapter-b").unwrap(), 1);
+    }
+
+    #[test]
+    fn per_adapter_api_call_counters() {
+        let stats = RuntimeStats::new();
+        stats.record_api_call_for("bot-1");
+        stats.record_api_call_for("bot-2");
+        stats.record_api_call_for("bot-1");
+        stats.record_api_call_for("bot-1");
+
+        assert_eq!(stats.api_calls_total.load(Ordering::Relaxed), 4);
+
+        let map = stats.per_adapter_api_calls.read();
+        assert_eq!(*map.get("bot-1").unwrap(), 3);
+        assert_eq!(*map.get("bot-2").unwrap(), 1);
+    }
+
+    #[test]
+    fn prometheus_includes_per_adapter_metrics() {
+        let stats = RuntimeStats::new();
+        stats.record_event_for("test-adapter");
+        stats.record_api_call_for("test-adapter");
+
+        let output = stats.prometheus_metrics();
+        assert!(output.contains("ferroq_adapter_events_total{name=\"test-adapter\"} 1"));
+        assert!(output.contains("ferroq_adapter_api_calls_total{name=\"test-adapter\"} 1"));
     }
 }
