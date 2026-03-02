@@ -135,7 +135,8 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build]  # Docker is optional, don't block release
+    needs: [build]
+    if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

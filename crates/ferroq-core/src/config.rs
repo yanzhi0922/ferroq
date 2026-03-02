@@ -192,11 +192,19 @@ pub struct HttpPostTarget {
     pub secret: String,
 }
 
-/// Placeholder for OneBot v12 config (future).
+/// OneBot v12 specific configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OneBotV12Config {
     #[serde(default)]
     pub enabled: bool,
+
+    /// Enable HTTP action endpoint.
+    #[serde(default = "default_true")]
+    pub http: bool,
+
+    /// Enable forward WebSocket endpoint.
+    #[serde(default = "default_true")]
+    pub ws: bool,
 }
 
 /// Placeholder for Milky config (future).

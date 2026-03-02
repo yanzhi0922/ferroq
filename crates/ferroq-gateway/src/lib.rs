@@ -17,6 +17,7 @@ pub mod forward;
 pub mod management;
 pub mod middleware;
 pub mod onebot_v11;
+pub mod onebot_v12;
 pub mod router;
 pub mod runtime;
 pub mod server;

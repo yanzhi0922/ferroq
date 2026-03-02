@@ -515,8 +515,8 @@ logging:
     - `rate_limiter.wasm` — 频率限制
   - 插件可通过 Dashboard 管理（上传/启停）
 
-- [ ] **P3.2 更多协议输出**
-  - OneBot v12 实现
+- [~] **P3.2 更多协议输出**
+  - OneBot v12 实现 ✅
   - Milky 协议实现（LagrangeV2 的新协议）
   - Satori 协议实现（Koishi 生态）
 

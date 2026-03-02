@@ -71,6 +71,10 @@ protocols:
 
   # onebot_v12:
   #   enabled: false
+  #   # HTTP action endpoint (POST /action)
+  #   http: true
+  #   # Forward WebSocket (ws://host:port/onebot/v12/ws)
+  #   ws: true
 
   # milky:
   #   enabled: false

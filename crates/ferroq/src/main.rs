@@ -327,6 +327,23 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
+    // OneBot v12 protocol server.
+    if let Some(ref ob12_config) = config.protocols.onebot_v12 {
+        if ob12_config.enabled {
+            let server = ferroq_gateway::server::OneBotV12Server::new(
+                ob12_config.clone(),
+                std::sync::Arc::clone(&shared_config),
+            );
+            let ob12_router = server.build_router(
+                runtime.router().clone(),
+                runtime.bus().raw_sender(),
+                runtime.stats().clone(),
+            );
+            app = app.nest("/onebot/v12", ob12_router);
+            info!("OneBot v12 protocol server enabled");
+        }
+    }
+
     // Apply CORS middleware (allow all origins for API).
     let cors = tower_http::cors::CorsLayer::new()
         .allow_origin(tower_http::cors::Any)
