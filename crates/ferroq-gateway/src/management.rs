@@ -13,7 +13,9 @@ use axum::Json;
 use serde::Serialize;
 use tracing::{info, warn};
 
+use crate::middleware::RateLimiter;
 use crate::router::ApiRouter;
+use crate::shared_config::SharedConfig;
 use crate::stats::RuntimeStats;
 use crate::storage::{MessageQuery, MessageStore};
 
@@ -23,6 +25,8 @@ pub struct ManagementState {
     pub stats: Arc<RuntimeStats>,
     pub store: Option<Arc<MessageStore>>,
     pub config_path: Option<PathBuf>,
+    pub shared_config: Arc<SharedConfig>,
+    pub rate_limiter: Option<RateLimiter>,
 }
 
 /// Build the management API router.
@@ -38,12 +42,16 @@ pub fn management_routes(
     stats: Arc<RuntimeStats>,
     store: Option<Arc<MessageStore>>,
     config_path: Option<PathBuf>,
+    shared_config: Arc<SharedConfig>,
+    rate_limiter: Option<RateLimiter>,
 ) -> axum::Router {
     let state = Arc::new(ManagementState {
         router,
         stats,
         store,
         config_path,
+        shared_config,
+        rate_limiter,
     });
 
     axum::Router::new()
@@ -193,18 +201,47 @@ async fn handle_reload(
         }));
     }
 
-    // Config is valid. Log it. Full dynamic reload of adapters/servers is
-    // complex and deferred to a later phase. For now we validate + report.
+    // ----- Apply hot-reloadable settings -----
+    let mut changes: Vec<String> = Vec::new();
+
+    // Access token.
+    let current_token = state.shared_config.access_token();
+    if config.server.access_token != current_token {
+        state.shared_config.set_access_token(config.server.access_token.clone());
+        changes.push("access_token updated".into());
+        info!("config reload: access_token updated");
+    }
+
+    // Rate limit parameters.
+    if let Some(ref rl) = state.rate_limiter {
+        rl.update_config(
+            config.server.rate_limit.requests_per_second,
+            config.server.rate_limit.burst,
+        );
+        changes.push(format!(
+            "rate_limit updated: rps={}, burst={}",
+            config.server.rate_limit.requests_per_second,
+            config.server.rate_limit.burst,
+        ));
+        info!(
+            rps = config.server.rate_limit.requests_per_second,
+            burst = config.server.rate_limit.burst,
+            "config reload: rate limit updated"
+        );
+    }
+
     info!(
+        changes = changes.len(),
         accounts = config.accounts.len(),
-        "config reload: validated successfully (hot-swap pending)"
+        "config reload: applied successfully"
     );
 
     Json(serde_json::json!({
         "status": "ok",
-        "message": "configuration validated successfully — full hot-reload coming in a future release",
+        "message": "configuration reloaded",
+        "changes": changes,
         "warnings": warnings,
-        "accounts": config.accounts.len(),
+        "note": "adapter and protocol changes require restart",
     }))
 }
 

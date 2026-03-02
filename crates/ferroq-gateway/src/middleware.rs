@@ -11,6 +11,8 @@ use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
+use crate::shared_config::SharedConfig;
+
 /// Shared state that holds the expected access token.
 #[derive(Clone)]
 pub struct AuthState {
@@ -33,15 +35,28 @@ pub async fn access_token_auth(
     check_token(&auth.token, request, next).await
 }
 
-/// Wrap a router with access-token authentication.
+/// Wrap a router with access-token authentication (static token).
 ///
-/// This is the easiest way to protect an existing router that already
-/// has its own state — no need to change the outer state type.
+/// For a dynamically reloadable token, use [`with_dynamic_auth`] instead.
 pub fn with_auth(router: axum::Router, token: String) -> axum::Router {
     let token = Arc::new(token);
     router.layer(axum::middleware::from_fn(move |request: Request, next: Next| {
         let t = Arc::clone(&token);
         async move { check_token(&t, request, next).await }
+    }))
+}
+
+/// Wrap a router with access-token authentication backed by [`SharedConfig`].
+///
+/// The token is read from `SharedConfig` on every request, so changes made via
+/// hot-reload take effect immediately.
+pub fn with_dynamic_auth(router: axum::Router, shared: Arc<SharedConfig>) -> axum::Router {
+    router.layer(axum::middleware::from_fn(move |request: Request, next: Next| {
+        let cfg = Arc::clone(&shared);
+        async move {
+            let token = cfg.access_token();
+            check_token(&token, request, next).await
+        }
     }))
 }
 
@@ -88,10 +103,15 @@ async fn check_token(token: &str, request: Request, next: Next) -> Response {
 ///
 /// Call [`RateLimiter::start_refill`] to spawn the background refill task, then
 /// use [`with_rate_limit`] to wrap an axum Router.
+///
+/// Both `rps` and `burst` are stored as atomics so they can be updated at
+/// runtime via [`update_config`](RateLimiter::update_config) during a
+/// hot-reload without restarting the refill task.
 #[derive(Clone)]
 pub struct RateLimiter {
     tokens: Arc<AtomicU32>,
-    burst: u32,
+    burst: Arc<AtomicU32>,
+    rps: Arc<AtomicU32>,
 }
 
 impl RateLimiter {
@@ -101,21 +121,29 @@ impl RateLimiter {
     pub fn new(burst: u32) -> Self {
         Self {
             tokens: Arc::new(AtomicU32::new(burst)),
-            burst,
+            burst: Arc::new(AtomicU32::new(burst)),
+            rps: Arc::new(AtomicU32::new(0)),
         }
     }
 
-    /// Spawn a background task that refills `rps` tokens every second.
+    /// Spawn a background task that refills tokens every second.
+    ///
+    /// The task reads `rps` and `burst` from atomics each tick, so
+    /// changes made via [`update_config`](Self::update_config) take
+    /// effect within one second.
     pub fn start_refill(&self, rps: u32) -> tokio::task::JoinHandle<()> {
+        self.rps.store(rps, Ordering::Relaxed);
         let tokens = Arc::clone(&self.tokens);
-        let burst = self.burst;
+        let burst = Arc::clone(&self.burst);
+        let rps_atomic = Arc::clone(&self.rps);
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
             loop {
                 interval.tick().await;
-                // Add `rps` tokens, capped at `burst`.
+                let r = rps_atomic.load(Ordering::Relaxed);
+                let b = burst.load(Ordering::Relaxed);
                 tokens.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                    Some(current.saturating_add(rps).min(burst))
+                    Some(current.saturating_add(r).min(b))
                 }).ok();
             }
         })
@@ -132,6 +160,14 @@ impl RateLimiter {
                 }
             })
             .is_ok()
+    }
+
+    /// Update rate limit parameters at runtime (hot-reload).
+    ///
+    /// The background refill task picks up the new values on its next tick.
+    pub fn update_config(&self, rps: u32, burst: u32) {
+        self.rps.store(rps, Ordering::Relaxed);
+        self.burst.store(burst, Ordering::Relaxed);
     }
 }
 

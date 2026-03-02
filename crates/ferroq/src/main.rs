@@ -169,15 +169,38 @@ async fn main() -> anyhow::Result<()> {
     let stats = runtime.stats().clone();
     let health_stats = stats.clone();
 
-    // Management API routes — protected by access token middleware.
-    let mgmt_router = ferroq_gateway::middleware::with_auth(
+    // Shared runtime-mutable config (for hot-reload).
+    let shared_config = std::sync::Arc::new(
+        ferroq_gateway::shared_config::SharedConfig::new(config.server.access_token.clone()),
+    );
+
+    // Optional global rate limiter — created upfront so management can reference it.
+    let rate_limiter = if config.server.rate_limit.enabled {
+        let limiter = ferroq_gateway::middleware::RateLimiter::new(
+            config.server.rate_limit.burst,
+        );
+        limiter.start_refill(config.server.rate_limit.requests_per_second);
+        info!(
+            rps = config.server.rate_limit.requests_per_second,
+            burst = config.server.rate_limit.burst,
+            "global rate limiting enabled"
+        );
+        Some(limiter)
+    } else {
+        None
+    };
+
+    // Management API routes — protected by dynamic access token middleware.
+    let mgmt_router = ferroq_gateway::middleware::with_dynamic_auth(
         ferroq_gateway::management::management_routes(
             runtime.router().clone(),
             runtime.stats().clone(),
             runtime.store().clone(),
             Some(config_path.clone()),
+            std::sync::Arc::clone(&shared_config),
+            rate_limiter.clone(),
         ),
-        config.server.access_token.clone(),
+        std::sync::Arc::clone(&shared_config),
     );
 
     let metrics_stats = stats.clone();
@@ -209,7 +232,7 @@ async fn main() -> anyhow::Result<()> {
         if ob_config.enabled {
             let server = ferroq_gateway::server::OneBotV11Server::new(
                 ob_config.clone(),
-                config.server.access_token.clone(),
+                std::sync::Arc::clone(&shared_config),
             );
             // Build the sub-router for /onebot/v11/*.
             let ob_router = server.build_router(
@@ -223,6 +246,7 @@ async fn main() -> anyhow::Result<()> {
             server.start_background_tasks(
                 runtime.router().clone(),
                 runtime.bus().raw_sender(),
+                runtime.stats().clone(),
             );
 
             info!("OneBot v11 protocol server enabled");
@@ -247,18 +271,9 @@ async fn main() -> anyhow::Result<()> {
             tower_http::trace::DefaultOnResponse::new().level(tracing::Level::INFO),
         );
 
-    // Optional global rate limiter.
-    let app = if config.server.rate_limit.enabled {
-        let limiter = ferroq_gateway::middleware::RateLimiter::new(
-            config.server.rate_limit.burst,
-        );
-        limiter.start_refill(config.server.rate_limit.requests_per_second);
-        info!(
-            rps = config.server.rate_limit.requests_per_second,
-            burst = config.server.rate_limit.burst,
-            "global rate limiting enabled"
-        );
-        ferroq_gateway::middleware::with_rate_limit(app, limiter)
+    // Apply optional rate limit middleware.
+    let app = if let Some(ref limiter) = rate_limiter {
+        ferroq_gateway::middleware::with_rate_limit(app, limiter.clone())
             .layer(cors)
             .layer(trace_layer)
     } else {

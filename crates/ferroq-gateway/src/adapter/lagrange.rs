@@ -122,7 +122,8 @@ impl LagrangeAdapter {
         Ok(request)
     }
 
-    /// Establish a WebSocket connection. Returns split (write, read) halves.
+    /// Establish a WebSocket connection with a timeout.
+    /// Returns split (write, read) halves.
     async fn establish_ws(
         &self,
     ) -> Result<
@@ -135,9 +136,13 @@ impl LagrangeAdapter {
         let request = self.build_request()?;
         info!(url = %self.url, name = %self.name, "connecting to Lagrange backend");
 
-        let (ws_stream, _response) = connect_async(request)
-            .await
-            .map_err(|e| GatewayError::Connection(format!("websocket connect failed: {e}")))?;
+        let (ws_stream, _response) = tokio::time::timeout(
+            Duration::from_secs(15),
+            connect_async(request),
+        )
+        .await
+        .map_err(|_| GatewayError::Connection("websocket connect timed out after 15s".to_string()))?
+        .map_err(|e| GatewayError::Connection(format!("websocket connect failed: {e}")))?;
 
         info!(url = %self.url, name = %self.name, "connected to Lagrange backend");
         Ok(ws_stream.split())
@@ -233,8 +238,11 @@ impl LagrangeAdapter {
                     }
                 }
 
-                match connect_async(request).await {
-                    Ok((ws_stream, _)) => {
+                match tokio::time::timeout(
+                    Duration::from_secs(15),
+                    connect_async(request),
+                ).await {
+                    Ok(Ok((ws_stream, _))) => {
                         info!(name = %adapter_name, "reconnected to Lagrange backend");
                         let (ws_w, ws_r) = ws_stream.split();
 
@@ -253,8 +261,11 @@ impl LagrangeAdapter {
                         g.state = AdapterState::Connected;
                         break;
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         warn!(name = %adapter_name, "reconnect failed: {e}");
+                    }
+                    Err(_) => {
+                        warn!(name = %adapter_name, "reconnect timed out after 15s");
                     }
                 }
             }

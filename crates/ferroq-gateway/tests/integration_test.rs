@@ -16,6 +16,7 @@ use ferroq_gateway::adapter::LagrangeAdapter;
 use ferroq_gateway::bus::EventBus;
 use ferroq_gateway::router::ApiRouter;
 use ferroq_gateway::server::OneBotV11Server;
+use ferroq_gateway::shared_config::SharedConfig;
 use ferroq_gateway::stats::RuntimeStats;
 use futures::StreamExt;
 use tokio::net::TcpListener;
@@ -141,7 +142,7 @@ async fn full_pipeline_http_api() {
         ws_reverse: vec![],
         http_post: vec![],
     };
-    let server = OneBotV11Server::new(ob_config, String::new());
+    let server = OneBotV11Server::new(ob_config, Arc::new(SharedConfig::new(String::new())));
     let stats = Arc::new(RuntimeStats::new());
     let app = server.build_router(Arc::clone(&router), bus.raw_sender(), stats);
 
@@ -258,7 +259,7 @@ async fn forward_ws_receives_events() {
         ws_reverse: vec![],
         http_post: vec![],
     };
-    let server = OneBotV11Server::new(ob_config, String::new());
+    let server = OneBotV11Server::new(ob_config, Arc::new(SharedConfig::new(String::new())));
     let stats = Arc::new(RuntimeStats::new());
     let app = server.build_router(Arc::clone(&router), bus.raw_sender(), stats);
 

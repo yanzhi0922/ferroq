@@ -17,5 +17,6 @@ pub mod onebot_v11;
 pub mod router;
 pub mod runtime;
 pub mod server;
+pub mod shared_config;
 pub mod stats;
 pub mod storage;

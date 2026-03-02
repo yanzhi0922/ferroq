@@ -27,6 +27,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::onebot_v11 as parser;
 use crate::router::ApiRouter;
+use crate::shared_config::SharedConfig;
 use crate::stats::RuntimeStats;
 
 /// Shared state for the axum handlers.
@@ -34,14 +35,14 @@ use crate::stats::RuntimeStats;
 struct ServerState {
     router: Arc<ApiRouter>,
     bus_tx: broadcast::Sender<Event>,
-    access_token: String,
+    shared_config: Arc<SharedConfig>,
     stats: Arc<RuntimeStats>,
 }
 
 /// OneBot v11 inbound protocol server.
 pub struct OneBotV11Server {
     config: OneBotV11Config,
-    access_token: String,
+    shared_config: Arc<SharedConfig>,
     /// Handles for reverse WS tasks.
     reverse_ws_handles: Mutex<Vec<JoinHandle<()>>>,
     /// Handles for HTTP POST reporting tasks.
@@ -50,10 +51,10 @@ pub struct OneBotV11Server {
 
 impl OneBotV11Server {
     /// Create a new OneBot v11 server from config.
-    pub fn new(config: OneBotV11Config, access_token: String) -> Self {
+    pub fn new(config: OneBotV11Config, shared_config: Arc<SharedConfig>) -> Self {
         Self {
             config,
-            access_token,
+            shared_config,
             reverse_ws_handles: Mutex::new(Vec::new()),
             http_post_handles: Mutex::new(Vec::new()),
         }
@@ -71,7 +72,7 @@ impl OneBotV11Server {
         let state = Arc::new(ServerState {
             router,
             bus_tx,
-            access_token: self.access_token.clone(),
+            shared_config: Arc::clone(&self.shared_config),
             stats,
         });
 
@@ -97,6 +98,7 @@ impl OneBotV11Server {
         &self,
         router: Arc<ApiRouter>,
         bus_tx: broadcast::Sender<Event>,
+        stats: Arc<RuntimeStats>,
     ) {
         // Reverse WebSocket targets.
         for target in &self.config.ws_reverse {
@@ -104,7 +106,8 @@ impl OneBotV11Server {
                 target.clone(),
                 Arc::clone(&router),
                 bus_tx.clone(),
-                self.access_token.clone(),
+                Arc::clone(&self.shared_config),
+                Arc::clone(&stats),
             ));
             self.reverse_ws_handles.lock().push(handle);
         }
@@ -149,17 +152,18 @@ fn check_access_token(
     headers: &axum::http::HeaderMap,
     query: &AuthQuery,
 ) -> Result<(), (StatusCode, String)> {
-    if state.access_token.is_empty() {
+    let token = state.shared_config.access_token();
+    if token.is_empty() {
         return Ok(());
     }
 
     // Check Authorization header: "Bearer <token>" or "Token <token>".
     if let Some(auth) = headers.get("Authorization").and_then(|v| v.to_str().ok()) {
-        let token = auth
+        let t = auth
             .strip_prefix("Bearer ")
             .or_else(|| auth.strip_prefix("Token "));
-        if let Some(t) = token {
-            if t == state.access_token {
+        if let Some(t) = t {
+            if t == token {
                 return Ok(());
             }
         }
@@ -167,7 +171,7 @@ fn check_access_token(
 
     // Check query parameter.
     if let Some(ref t) = query.access_token {
-        if t == &state.access_token {
+        if *t == token {
             return Ok(());
         }
     }
@@ -357,12 +361,14 @@ async fn reverse_ws_task(
     target: WsReverseTarget,
     router: Arc<ApiRouter>,
     bus_tx: broadcast::Sender<Event>,
-    access_token: String,
+    shared_config: Arc<SharedConfig>,
+    stats: Arc<RuntimeStats>,
 ) {
     info!(url = %target.url, "starting reverse WS connection");
 
     loop {
-        // Build request with auth header.
+        // Build request with auth header (reads token from SharedConfig each attempt).
+        let access_token = shared_config.access_token();
         let request = match build_reverse_ws_request(&target, &access_token) {
             Ok(r) => r,
             Err(e) => {
@@ -413,8 +419,10 @@ async fn reverse_ws_task(
                             let echo = request.echo.clone();
                             let msg_tx_resp = msg_tx.clone();
                             let router_clone = Arc::clone(&router);
+                            let stats_clone = Arc::clone(&stats);
 
                             tokio::spawn(async move {
+                                stats_clone.record_api_call();
                                 let resp = match router_clone.route(request).await {
                                     Ok(mut r) => {
                                         r.echo = echo;
