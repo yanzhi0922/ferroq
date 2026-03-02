@@ -115,6 +115,11 @@ impl GatewayRuntime {
         &self.store
     }
 
+    /// Access the dedup filter (if enabled).
+    pub fn dedup(&self) -> &Option<Arc<DedupFilter>> {
+        &self.dedup
+    }
+
     /// Access the config.
     pub fn config(&self) -> &AppConfig {
         &self.config

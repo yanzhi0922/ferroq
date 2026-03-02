@@ -130,6 +130,9 @@ See [config.example.yaml](config.example.yaml) for the full configuration refere
 | `GET /metrics` | Prometheus-format metrics (per-adapter event/API counters) |
 | `GET /dashboard/` | Embedded web dashboard |
 | `GET /api/accounts` | List all registered backend adapters |
+| `POST /api/accounts/add` | Add a new adapter at runtime |
+| `POST /api/accounts/{name}/remove` | Remove an adapter |
+| `POST /api/accounts/{name}/reconnect` | Reconnect a specific adapter |
 | `GET /api/stats` | Full runtime statistics |
 | `GET /api/messages` | Query stored messages (with filters, pagination) |
 | `GET /api/config` | View current config (secrets redacted) |
@@ -161,6 +164,7 @@ See [config.example.yaml](config.example.yaml) for the full configuration refere
 - [x] **Phase 3.7** — Management API tests + testing hardening + documentation
 - [x] **Phase 3.8** — Failover adapters + adapter type accuracy
 - [x] **Phase 3.9** — Event deduplication + reverse WS exponential backoff
+- [x] **Phase 4.0** — Dynamic adapter management via REST API
 - [ ] **Phase 4** — Multi-account routing + failover + NapCat adapter
 - [ ] **Phase 5** — OneBot v12 / Milky / Satori protocol servers
 - [ ] **Phase 6** — Plugin system + benchmarks + release

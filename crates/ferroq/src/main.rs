@@ -213,6 +213,16 @@ async fn main() -> anyhow::Result<()> {
 
     runtime.start().await?;
 
+    // Create the dynamic adapter manager for runtime add/remove/reconnect.
+    let adapter_manager = std::sync::Arc::new(
+        ferroq_gateway::adapter_manager::AdapterManager::new(
+            runtime.bus().clone(),
+            runtime.router().clone(),
+            runtime.stats().clone(),
+            runtime.dedup().clone(),
+        ),
+    );
+
     // Build the HTTP server (dashboard + management API + protocol servers)
     let stats = runtime.stats().clone();
     let health_stats = stats.clone();
@@ -240,13 +250,14 @@ async fn main() -> anyhow::Result<()> {
 
     // Management API routes — protected by dynamic access token middleware.
     let mgmt_router = ferroq_gateway::middleware::with_dynamic_auth(
-        ferroq_gateway::management::management_routes(
+        ferroq_gateway::management::management_routes_with_manager(
             runtime.router().clone(),
             runtime.stats().clone(),
             runtime.store().clone(),
             Some(config_path.clone()),
             std::sync::Arc::clone(&shared_config),
             rate_limiter.clone(),
+            Some(std::sync::Arc::clone(&adapter_manager)),
         ),
         std::sync::Arc::clone(&shared_config),
     );
@@ -337,6 +348,7 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     runtime.shutdown().await?;
+    adapter_manager.shutdown().await;
     // Stop OneBot v11 background tasks.
     if let Some(ref server) = onebot_v11_server {
         server.stop_background_tasks();

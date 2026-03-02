@@ -13,6 +13,7 @@ use axum::Json;
 use serde::Serialize;
 use tracing::{info, warn};
 
+use crate::adapter_manager::AdapterManager;
 use crate::middleware::RateLimiter;
 use crate::router::ApiRouter;
 use crate::shared_config::SharedConfig;
@@ -27,12 +28,16 @@ pub struct ManagementState {
     pub config_path: Option<PathBuf>,
     pub shared_config: Arc<SharedConfig>,
     pub rate_limiter: Option<RateLimiter>,
+    pub adapter_manager: Option<Arc<AdapterManager>>,
 }
 
 /// Build the management API router.
 ///
 /// Endpoints:
 /// - `GET  /api/accounts` — list all registered backend adapters
+/// - `POST /api/accounts/add` — add a new adapter at runtime
+/// - `POST /api/accounts/{name}/remove` — remove an adapter
+/// - `POST /api/accounts/{name}/reconnect` — reconnect an adapter
 /// - `GET  /api/messages` — query stored messages
 /// - `GET  /api/stats`    — runtime statistics
 /// - `POST /api/reload`   — reload configuration file
@@ -45,6 +50,19 @@ pub fn management_routes(
     shared_config: Arc<SharedConfig>,
     rate_limiter: Option<RateLimiter>,
 ) -> axum::Router {
+    management_routes_with_manager(router, stats, store, config_path, shared_config, rate_limiter, None)
+}
+
+/// Build the management API router with an optional adapter manager.
+pub fn management_routes_with_manager(
+    router: Arc<ApiRouter>,
+    stats: Arc<RuntimeStats>,
+    store: Option<Arc<MessageStore>>,
+    config_path: Option<PathBuf>,
+    shared_config: Arc<SharedConfig>,
+    rate_limiter: Option<RateLimiter>,
+    adapter_manager: Option<Arc<AdapterManager>>,
+) -> axum::Router {
     let state = Arc::new(ManagementState {
         router,
         stats,
@@ -52,10 +70,14 @@ pub fn management_routes(
         config_path,
         shared_config,
         rate_limiter,
+        adapter_manager,
     });
 
     axum::Router::new()
         .route("/accounts", get(handle_list_accounts))
+        .route("/accounts/add", post(handle_add_adapter))
+        .route("/accounts/{name}/remove", post(handle_remove_adapter))
+        .route("/accounts/{name}/reconnect", post(handle_reconnect_adapter))
         .route("/messages", get(handle_query_messages))
         .route("/stats", get(handle_stats))
         .route("/reload", post(handle_reload))
@@ -302,6 +324,109 @@ async fn handle_config(
     }))
 }
 
+// ---------------------------------------------------------------------------
+// POST /api/accounts/add
+// ---------------------------------------------------------------------------
+
+/// Request body for adding a new adapter at runtime.
+#[derive(serde::Deserialize)]
+struct AddAdapterRequest {
+    name: String,
+    backend: ferroq_core::config::BackendConfig,
+}
+
+async fn handle_add_adapter(
+    State(state): State<Arc<ManagementState>>,
+    Json(body): Json<AddAdapterRequest>,
+) -> impl IntoResponse {
+    let Some(ref mgr) = state.adapter_manager else {
+        return Json(serde_json::json!({
+            "status": "failed",
+            "retcode": 1,
+            "message": "adapter manager is not available",
+        }));
+    };
+
+    match mgr.add_adapter(&body.name, &body.backend).await {
+        Ok(()) => Json(serde_json::json!({
+            "status": "ok",
+            "message": format!("adapter '{}' added", body.name),
+        })),
+        Err(e) => {
+            warn!(name = %body.name, error = %e, "add adapter failed");
+            Json(serde_json::json!({
+                "status": "failed",
+                "retcode": 2,
+                "message": e.to_string(),
+            }))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/accounts/{name}/remove
+// ---------------------------------------------------------------------------
+
+async fn handle_remove_adapter(
+    State(state): State<Arc<ManagementState>>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let Some(ref mgr) = state.adapter_manager else {
+        return Json(serde_json::json!({
+            "status": "failed",
+            "retcode": 1,
+            "message": "adapter manager is not available",
+        }));
+    };
+
+    match mgr.remove_adapter(&name).await {
+        Ok(()) => Json(serde_json::json!({
+            "status": "ok",
+            "message": format!("adapter '{}' removed", name),
+        })),
+        Err(e) => {
+            warn!(name = %name, error = %e, "remove adapter failed");
+            Json(serde_json::json!({
+                "status": "failed",
+                "retcode": 2,
+                "message": e.to_string(),
+            }))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/accounts/{name}/reconnect
+// ---------------------------------------------------------------------------
+
+async fn handle_reconnect_adapter(
+    State(state): State<Arc<ManagementState>>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let Some(ref mgr) = state.adapter_manager else {
+        return Json(serde_json::json!({
+            "status": "failed",
+            "retcode": 1,
+            "message": "adapter manager is not available",
+        }));
+    };
+
+    match mgr.reconnect_adapter(&name).await {
+        Ok(()) => Json(serde_json::json!({
+            "status": "ok",
+            "message": format!("adapter '{}' reconnected", name),
+        })),
+        Err(e) => {
+            warn!(name = %name, error = %e, "reconnect adapter failed");
+            Json(serde_json::json!({
+                "status": "failed",
+                "retcode": 2,
+                "message": e.to_string(),
+            }))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,7 +443,15 @@ mod tests {
         let router = Arc::new(ApiRouter::new());
         let stats = Arc::new(RuntimeStats::new());
         let shared_config = Arc::new(SharedConfig::new(String::new()));
-        let app = management_routes(router, stats.clone(), None, None, shared_config, None);
+        let app = management_routes_with_manager(
+            router,
+            stats.clone(),
+            None,
+            None,
+            shared_config,
+            None,
+            None,
+        );
         (app, stats)
     }
 
@@ -563,5 +696,139 @@ logging:
 
         // Cleanup.
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // Dynamic adapter management endpoint tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn add_adapter_fails_without_manager() {
+        let (app, _stats) = build_test_app();
+        let req = HttpRequest::builder()
+            .method("POST")
+            .uri("/accounts/add")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"name":"bot","backend":{"type":"lagrange","url":"ws://localhost:1234"}}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "failed");
+        assert!(json["message"].as_str().unwrap().contains("not available"));
+    }
+
+    #[tokio::test]
+    async fn remove_adapter_fails_without_manager() {
+        let (app, _stats) = build_test_app();
+        let req = HttpRequest::builder()
+            .method("POST")
+            .uri("/accounts/some-bot/remove")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "failed");
+        assert!(json["message"].as_str().unwrap().contains("not available"));
+    }
+
+    #[tokio::test]
+    async fn reconnect_adapter_fails_without_manager() {
+        let (app, _stats) = build_test_app();
+        let req = HttpRequest::builder()
+            .method("POST")
+            .uri("/accounts/some-bot/reconnect")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "failed");
+        assert!(json["message"].as_str().unwrap().contains("not available"));
+    }
+
+    /// Build a test app with an AdapterManager wired in.
+    fn build_test_app_with_manager() -> (axum::Router, Arc<AdapterManager>) {
+        let router = Arc::new(ApiRouter::new());
+        let stats = Arc::new(RuntimeStats::new());
+        let shared_config = Arc::new(SharedConfig::new(String::new()));
+        let bus = Arc::new(crate::bus::EventBus::new());
+        let mgr = Arc::new(AdapterManager::new(
+            bus,
+            Arc::clone(&router),
+            Arc::clone(&stats),
+            None,
+        ));
+        let app = management_routes_with_manager(
+            router,
+            stats,
+            None,
+            None,
+            shared_config,
+            None,
+            Some(Arc::clone(&mgr)),
+        );
+        (app, mgr)
+    }
+
+    #[tokio::test]
+    async fn remove_adapter_not_found() {
+        let (app, _mgr) = build_test_app_with_manager();
+        let req = HttpRequest::builder()
+            .method("POST")
+            .uri("/accounts/nonexistent/remove")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "failed");
+        assert!(json["message"].as_str().unwrap().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn reconnect_adapter_not_found() {
+        let (app, _mgr) = build_test_app_with_manager();
+        let req = HttpRequest::builder()
+            .method("POST")
+            .uri("/accounts/nonexistent/reconnect")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "failed");
+        assert!(json["message"].as_str().unwrap().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn add_adapter_unknown_backend_type() {
+        let (app, _mgr) = build_test_app_with_manager();
+        let req = HttpRequest::builder()
+            .method("POST")
+            .uri("/accounts/add")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"name":"bot","backend":{"type":"unknown","url":"ws://localhost:1234"}}"#,
+            ))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "failed");
+        assert!(json["message"].as_str().unwrap().contains("unknown backend type"));
     }
 }

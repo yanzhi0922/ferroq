@@ -55,6 +55,46 @@ impl ApiRouter {
         debug!(self_id, adapter_index, "associated self_id with adapter");
     }
 
+    /// List the names of all registered adapters.
+    pub fn list_names(&self) -> Vec<String> {
+        self.adapters
+            .read()
+            .iter()
+            .map(|a| a.info().name)
+            .collect()
+    }
+
+    /// Unregister an adapter by name.
+    ///
+    /// Removes the adapter from the ordered list and cleans up the routing
+    /// table entries that pointed to it. Returns the removed adapter (if found).
+    pub fn unregister(&self, name: &str) -> Option<Arc<dyn BackendAdapter>> {
+        let mut adapters = self.adapters.write();
+        let pos = adapters.iter().position(|a| a.info().name == name)?;
+        let removed = adapters.remove(pos);
+
+        // Rebuild routing table — indices shifted after removal.
+        let mut table = self.routing_table.write();
+        table.clear();
+        for (idx, a) in adapters.iter().enumerate() {
+            if let Some(self_id) = a.info().self_id {
+                table.insert(self_id, idx);
+            }
+        }
+
+        // Recalculate default index.
+        let mut default = self.default_index.write();
+        if adapters.is_empty() {
+            *default = None;
+        } else {
+            // Keep default at 0 since we may have shifted.
+            *default = Some(0);
+        }
+
+        debug!(name, "unregistered adapter");
+        Some(removed)
+    }
+
     /// Route an API request to the appropriate backend.
     pub async fn route(&self, request: ApiRequest) -> Result<ApiResponse, GatewayError> {
         let (resp, _name) = self.route_named(request).await?;

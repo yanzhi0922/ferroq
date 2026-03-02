@@ -10,6 +10,7 @@
 //! - **OneBot v11 parser** — parse raw OneBot v11 events/actions
 
 pub mod adapter;
+pub mod adapter_manager;
 pub mod bus;
 pub mod dedup;
 pub mod management;
