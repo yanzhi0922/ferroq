@@ -48,4 +48,24 @@ tokio = { workspace = true, features = ["full", "test-util"] }
 tokio-tungstenite.workspace = true
 reqwest.workspace = true
 chrono.workspace = true
-rand.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "event_bus"
+harness = false
+
+[[bench]]
+name = "event_parse"
+harness = false
+
+[[bench]]
+name = "dedup_filter"
+harness = false
+
+[[bench]]
+name = "pipeline"
+harness = false
+
+[[bench]]
+name = "memory_profile"
+harness = false

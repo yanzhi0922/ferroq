@@ -520,7 +520,7 @@ logging:
   - Milky 协议实现（LagrangeV2 的新协议）— 缺乏公开文档，暂跳过
   - Satori 协议实现 ✅
 
-- [ ] **P3.3 性能工程**
+- [x] **P3.3 性能工程** ✅
   - 专项 benchmark 套件：
     - 消息转发延迟（p50/p95/p99）
     - 吞吐量（msg/s at 1KB payload）
