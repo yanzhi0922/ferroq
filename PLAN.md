@@ -506,7 +506,7 @@ logging:
 
 ### Phase 3 — 护城河（4-6 周）→ v1.0.0
 
-- [ ] **P3.1 WASM 插件系统**
+- [x] **P3.1 WASM 插件系统**
   - 定义 `Plugin` WASI 接口
   - wasmtime 沙箱加载
   - 示例插件：
@@ -517,8 +517,8 @@ logging:
 
 - [~] **P3.2 更多协议输出**
   - OneBot v12 实现 ✅
-  - Milky 协议实现（LagrangeV2 的新协议）
-  - Satori 协议实现（Koishi 生态）
+  - Milky 协议实现（LagrangeV2 的新协议）— 缺乏公开文档，暂跳过
+  - Satori 协议实现 ✅
 
 - [ ] **P3.3 性能工程**
   - 专项 benchmark 套件：
