@@ -81,6 +81,10 @@ protocols:
 
   # satori:
   #   enabled: false
+  #   # HTTP API (POST /satori/v1/{resource}.{method})
+  #   http: true
+  #   # WebSocket event stream (ws://host:port/satori/v1/events)
+  #   ws: true
 
 # Message storage (SQLite)
 storage:

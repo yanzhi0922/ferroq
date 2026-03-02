@@ -344,6 +344,23 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Satori protocol server.
+    if let Some(ref satori_config) = config.protocols.satori {
+        if satori_config.enabled {
+            let server = ferroq_gateway::server::SatoriServer::new(
+                satori_config.clone(),
+                std::sync::Arc::clone(&shared_config),
+            );
+            let satori_router = server.build_router(
+                runtime.router().clone(),
+                runtime.bus().raw_sender(),
+                runtime.stats().clone(),
+            );
+            app = app.nest("/satori/v1", satori_router);
+            info!("Satori protocol server enabled");
+        }
+    }
+
     // Apply CORS middleware (allow all origins for API).
     let cors = tower_http::cors::CorsLayer::new()
         .allow_origin(tower_http::cors::Any)

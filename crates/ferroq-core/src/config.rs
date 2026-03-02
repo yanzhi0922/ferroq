@@ -214,11 +214,19 @@ pub struct MilkyConfig {
     pub enabled: bool,
 }
 
-/// Placeholder for Satori config (future).
+/// Satori protocol configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SatoriConfig {
     #[serde(default)]
     pub enabled: bool,
+
+    /// Enable HTTP API endpoint (`POST /v1/{resource}.{method}`).
+    #[serde(default = "default_true")]
+    pub http: bool,
+
+    /// Enable WebSocket event endpoint (`/v1/events`).
+    #[serde(default = "default_true")]
+    pub ws: bool,
 }
 
 /// Message storage settings.

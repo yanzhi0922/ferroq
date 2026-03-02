@@ -20,6 +20,7 @@ pub mod onebot_v11;
 pub mod onebot_v12;
 pub mod router;
 pub mod runtime;
+pub mod satori;
 pub mod server;
 pub mod shared_config;
 pub mod stats;
