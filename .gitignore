@@ -21,3 +21,4 @@ data/
 logs/
 config.yaml
 *.db
+.env

@@ -216,10 +216,7 @@ pub fn parse_v12_action(raw: serde_json::Value) -> Result<ApiRequest, GatewayErr
 }
 
 /// Translate a v12 action name and params into v11 equivalents.
-fn translate_v12_action(
-    action: &str,
-    params: serde_json::Value,
-) -> (String, serde_json::Value) {
+fn translate_v12_action(action: &str, params: serde_json::Value) -> (String, serde_json::Value) {
     match action {
         "send_message" => {
             // v12 `send_message` → v11 `send_msg` / `send_group_msg` / `send_private_msg`
@@ -246,16 +243,16 @@ fn translate_v12_action(
                     v11_params.insert("user_id".to_string(), serde_json::json!(id));
                 }
             }
-            v11_params.insert(
-                "message_type".to_string(),
-                serde_json::json!(detail_type),
-            );
+            v11_params.insert("message_type".to_string(), serde_json::json!(detail_type));
             // Pass through message segments as-is (v12 format is compatible).
             if let Some(msg) = params.get("message") {
                 v11_params.insert("message".to_string(), msg.clone());
             }
 
-            (v11_action.to_string(), serde_json::Value::Object(v11_params))
+            (
+                v11_action.to_string(),
+                serde_json::Value::Object(v11_params),
+            )
         }
         "get_self_info" => ("get_login_info".to_string(), params),
         "get_message" => {
@@ -299,10 +296,7 @@ pub fn translate_v11_response(action: &str, resp: ApiResponse) -> serde_json::Va
                     serde_json::Value::String(s) => s.clone(),
                     other => other.to_string(),
                 };
-                v12_data.insert(
-                    "user_id".to_string(),
-                    serde_json::json!(uid_str),
-                );
+                v12_data.insert("user_id".to_string(), serde_json::json!(uid_str));
                 v12_data.insert(
                     "user_name".to_string(),
                     resp.data
@@ -412,8 +406,10 @@ mod tests {
 
     #[test]
     fn translate_get_self_info() {
-        let (action, _) =
-            translate_v12_action("get_self_info", serde_json::Value::Object(Default::default()));
+        let (action, _) = translate_v12_action(
+            "get_self_info",
+            serde_json::Value::Object(Default::default()),
+        );
         assert_eq!(action, "get_login_info");
     }
 
