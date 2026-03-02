@@ -44,6 +44,10 @@ pub struct ServerConfig {
     /// Enable the web dashboard.
     #[serde(default = "default_true")]
     pub dashboard: bool,
+
+    /// Rate limiting settings.
+    #[serde(default)]
+    pub rate_limit: RateLimitConfig,
 }
 
 impl Default for ServerConfig {
@@ -53,6 +57,33 @@ impl Default for ServerConfig {
             port: default_port(),
             access_token: String::new(),
             dashboard: true,
+            rate_limit: RateLimitConfig::default(),
+        }
+    }
+}
+
+/// Rate limiting configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitConfig {
+    /// Whether rate limiting is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Maximum requests per second (global).
+    #[serde(default = "default_rps")]
+    pub requests_per_second: u32,
+
+    /// Burst size — how many requests can arrive at once before throttling.
+    #[serde(default = "default_burst")]
+    pub burst: u32,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            requests_per_second: default_rps(),
+            burst: default_burst(),
         }
     }
 }
@@ -244,6 +275,14 @@ fn default_max_days() -> u32 {
 
 fn default_log_level() -> String {
     "info".to_string()
+}
+
+fn default_rps() -> u32 {
+    100
+}
+
+fn default_burst() -> u32 {
+    200
 }
 
 #[cfg(test)]

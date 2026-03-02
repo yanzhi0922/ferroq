@@ -8,6 +8,13 @@ server:
   access_token: ""
   # Enable the web dashboard
   dashboard: true
+  # Rate limiting (global, token-bucket)
+  rate_limit:
+    enabled: false
+    # Maximum requests per second
+    requests_per_second: 100
+    # Burst size — peak allowed before throttling
+    burst: 200
 
 # Backend accounts — each account connects to one QQ protocol backend
 accounts:

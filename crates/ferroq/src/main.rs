@@ -233,7 +233,23 @@ async fn main() -> anyhow::Result<()> {
             tower_http::trace::DefaultOnResponse::new().level(tracing::Level::INFO),
         );
 
-    let app = app.layer(cors).layer(trace_layer);
+    // Optional global rate limiter.
+    let app = if config.server.rate_limit.enabled {
+        let limiter = ferroq_gateway::middleware::RateLimiter::new(
+            config.server.rate_limit.burst,
+        );
+        limiter.start_refill(config.server.rate_limit.requests_per_second);
+        info!(
+            rps = config.server.rate_limit.requests_per_second,
+            burst = config.server.rate_limit.burst,
+            "global rate limiting enabled"
+        );
+        ferroq_gateway::middleware::with_rate_limit(app, limiter)
+            .layer(cors)
+            .layer(trace_layer)
+    } else {
+        app.layer(cors).layer(trace_layer)
+    };
 
     let addr = format!("{}:{}", config.server.host, config.server.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;

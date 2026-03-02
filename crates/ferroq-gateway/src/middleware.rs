@@ -1,7 +1,9 @@
 //! HTTP middleware layers for ferroq.
 //!
 //! - **`access_token_auth`** — Bearer token / query-param authentication.
+//! - **`RateLimiter`** — Global token-bucket rate limiter.
 
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use axum::extract::Request;
@@ -76,6 +78,81 @@ async fn check_token(token: &str, request: Request, next: Next) -> Response {
     }
 
     (StatusCode::UNAUTHORIZED, "access token required or invalid").into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Rate limiter
+// ---------------------------------------------------------------------------
+
+/// A global token-bucket rate limiter.
+///
+/// Call [`RateLimiter::start_refill`] to spawn the background refill task, then
+/// use [`with_rate_limit`] to wrap an axum Router.
+#[derive(Clone)]
+pub struct RateLimiter {
+    tokens: Arc<AtomicU32>,
+    burst: u32,
+}
+
+impl RateLimiter {
+    /// Create a new rate limiter.
+    ///
+    /// - `burst`: maximum number of tokens (= requests) in the bucket.
+    pub fn new(burst: u32) -> Self {
+        Self {
+            tokens: Arc::new(AtomicU32::new(burst)),
+            burst,
+        }
+    }
+
+    /// Spawn a background task that refills `rps` tokens every second.
+    pub fn start_refill(&self, rps: u32) -> tokio::task::JoinHandle<()> {
+        let tokens = Arc::clone(&self.tokens);
+        let burst = self.burst;
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+            loop {
+                interval.tick().await;
+                // Add `rps` tokens, capped at `burst`.
+                tokens.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                    Some(current.saturating_add(rps).min(burst))
+                }).ok();
+            }
+        })
+    }
+
+    /// Try to consume one token. Returns `true` if allowed.
+    pub fn try_acquire(&self) -> bool {
+        self.tokens
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                if current > 0 {
+                    Some(current - 1)
+                } else {
+                    None
+                }
+            })
+            .is_ok()
+    }
+}
+
+/// Wrap a router with global rate limiting.
+///
+/// Returns HTTP 429 when the bucket is empty.
+pub fn with_rate_limit(router: axum::Router, limiter: RateLimiter) -> axum::Router {
+    router.layer(axum::middleware::from_fn(move |request: Request, next: Next| {
+        let rl = limiter.clone();
+        async move {
+            if rl.try_acquire() {
+                next.run(request).await
+            } else {
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "rate limit exceeded",
+                )
+                    .into_response()
+            }
+        }
+    }))
 }
 
 #[cfg(test)]
@@ -167,5 +244,57 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn rate_limiter_allows_within_burst() {
+        let rl = RateLimiter::new(5);
+        for _ in 0..5 {
+            assert!(rl.try_acquire());
+        }
+        // 6th request exceeds burst — should fail.
+        assert!(!rl.try_acquire());
+    }
+
+    #[tokio::test]
+    async fn rate_limiter_refill() {
+        let rl = RateLimiter::new(2);
+        // Exhaust tokens.
+        assert!(rl.try_acquire());
+        assert!(rl.try_acquire());
+        assert!(!rl.try_acquire());
+
+        // Start refill — 10 per second.
+        let _handle = rl.start_refill(10);
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+
+        // After 1 second, tokens should be refilled.
+        assert!(rl.try_acquire());
+    }
+
+    #[tokio::test]
+    async fn rate_limiter_middleware_returns_429() {
+        let rl = RateLimiter::new(1);
+        let app = with_rate_limit(
+            axum::Router::new().route("/test", get(|| async { "ok" })),
+            rl,
+        );
+
+        // First request should pass.
+        let req1 = HttpRequest::builder()
+            .uri("/test")
+            .body(Body::empty())
+            .unwrap();
+        let app2 = app.clone();
+        let resp1 = app.oneshot(req1).await.unwrap();
+        assert_eq!(resp1.status(), StatusCode::OK);
+
+        // Second request should be rate limited.
+        let req2 = HttpRequest::builder()
+            .uri("/test")
+            .body(Body::empty())
+            .unwrap();
+        let resp2 = app2.oneshot(req2).await.unwrap();
+        assert_eq!(resp2.status(), StatusCode::TOO_MANY_REQUESTS);
     }
 }

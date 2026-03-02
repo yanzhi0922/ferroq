@@ -36,6 +36,9 @@ url.workspace = true
 async-trait.workspace = true
 arc-swap.workspace = true
 parking_lot.workspace = true
+hmac.workspace = true
+sha1.workspace = true
+hex.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
