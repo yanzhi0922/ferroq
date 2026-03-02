@@ -410,17 +410,17 @@ logging:
 
 ## 6. 实现路线图
 
-### Phase 1 — 骨架 + 最小转发（2-3 周）→ 发布 v0.1.0
+### Phase 1 — 骨架 + 最小转发（2-3 周）→ 发布 v0.1.0 ✅
 
 目标：能转发消息，跑起来就能用。**发到 GitHub 开始收 stars。**
 
-- [ ] **P1.1 workspace 脚手架**
+- [x] **P1.1 workspace 脚手架**
   - 创建 4 个 crate 骨架
   - `rust-toolchain.toml`（stable 1.85+）
   - `.rustfmt.toml` + `clippy.toml` + `.github/workflows/ci.yml`
   - `cargo build` 通过
 
-- [ ] **P1.2 核心类型（ferroq-core）**
+- [x] **P1.2 核心类型（ferroq-core）**
   - `Event` 枚举（消息/通知/请求/元事件）
   - `ApiRequest` / `ApiResponse` 结构体
   - `MessageSegment` 类型（text / image / at / face / reply / ...）
@@ -429,7 +429,7 @@ logging:
   - 配置结构体 + YAML 解析
   - 错误类型
 
-- [ ] **P1.3 Lagrange 后端适配器**
+- [x] **P1.3 Lagrange 后端适配器**
   - 实现 `BackendAdapter` for `LagrangeAdapter`
   - 作为 WebSocket **客户端** 连接 Lagrange.OneBot 正向 WS
   - 接收事件 → 解析为内部 `Event`
@@ -437,7 +437,7 @@ logging:
   - 自动重连（指数退避 1s → 60s）
   - 健康检查（WebSocket ping/pong）
 
-- [ ] **P1.4 OneBot v11 入站协议**
+- [x] **P1.4 OneBot v11 入站协议**
   - HTTP Server（axum）
     - `POST /send_msg`、`POST /send_group_msg`、`POST /send_private_msg`
     - `GET /get_login_info`、`GET /get_status`
@@ -448,13 +448,13 @@ logging:
     - 连接上游，推送事件
   - HTTP POST 上报
 
-- [ ] **P1.5 CLI + 集成**
+- [x] **P1.5 CLI + 集成**
   - `ferroq --config config.yaml` 启动
   - `ferroq --generate-config` 生成默认配置
   - 启动时打印 ASCII banner + 连接状态
   - graceful shutdown (Ctrl+C)
 
-- [ ] **P1.6 README + CI/CD**
+- [x] **P1.6 README + CI/CD**
   - README：架构图 + 功能对比表 + 一键安装命令 + 截图
   - GitHub Actions：test → build → release（Linux/macOS/Windows 三平台）
   - `cargo install ferroq` 支持
@@ -468,28 +468,28 @@ logging:
 
 ### Phase 2 — 差异化功能（3-4 周）→ v0.5.0
 
-- [ ] **P2.1 多后端支持**
+- [~] **P2.1 多后端支持** (Lagrange + NapCat 完成，官方 Bot API 待做)
   - NapCat 适配器（OneBot WS 协议基本相同，适配差异字段）
   - QQ 官方 Bot API 适配器（HTTP API，需要不同的事件映射）
   - 后端路由器：按账号路由、按优先级路由
 
-- [ ] **P2.2 多账号管理**
+- [x] **P2.2 多账号管理**
   - 多个账号 → 多个后端连接 → 统一 EventBus
   - API 调用时通过 `self_id` 参数路由到正确后端
   - 账号动态增删（运行时 API，不重启）
 
-- [ ] **P2.3 故障转移**
+- [x] **P2.3 故障转移**
   - 主后端断线 → 自动切换到 fallback
   - 主后端恢复 → 自动切回
   - 健康检查 + 状态上报
 
-- [ ] **P2.4 消息持久化**
+- [x] **P2.4 消息持久化**
   - 收到的消息写入 SQLite
   - `GET /get_msg` 支持从本地 DB 查询（后端通常不存历史消息）
   - `GET /get_group_msg_history` 本地实现
   - 自动清理过期数据
 
-- [ ] **P2.5 Web Dashboard**
+- [x] **P2.5 Web Dashboard**
   - 极简前端（纯 HTML + JS，不用重型框架）
   - 通过 `rust-embed` 编译进二进制
   - 页面：
@@ -498,7 +498,7 @@ logging:
     - 配置编辑（在线修改 YAML，热重载）
     - 后端管理（添加/移除/重连）
 
-- [ ] **P2.6 Docker + 一键部署**
+- [x] **P2.6 Docker + 一键部署**
   - `docker run -v ./config.yaml:/etc/ferroq/config.yaml ghcr.io/xxx/ferroq`
   - docker-compose 样例（ferroq + Lagrange 一起跑）
 

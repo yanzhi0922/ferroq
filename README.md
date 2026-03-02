@@ -5,9 +5,13 @@
 **High-performance QQ Bot unified gateway** — written in pure Rust
 
 [![CI](https://github.com/yanzhi0922/ferroq/actions/workflows/ci.yml/badge.svg)](https://github.com/yanzhi0922/ferroq/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/yanzhi0922/ferroq)](https://github.com/yanzhi0922/ferroq/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://ghcr.io/yanzhi0922/ferroq)
 
 *One gateway to rule them all — connect any QQ protocol backend, serve any bot framework.*
+
+**English** | [简体中文](README_ZH.md)
 
 </div>
 
@@ -68,6 +72,36 @@ Instead of reimplementing the QQ protocol, ferroq acts as a **unified proxy / ro
 ```
 
 ## Quick Start
+
+### Docker (Recommended)
+
+```bash
+# Download example config
+curl -LO https://raw.githubusercontent.com/yanzhi0922/ferroq/main/config.example.yaml
+mv config.example.yaml config.yaml
+# Edit config.yaml with your backend URL
+
+# Run
+docker run -d \
+  --name ferroq \
+  -p 8080:8080 \
+  -v $(pwd)/config.yaml:/app/config.yaml:ro \
+  -v $(pwd)/data:/app/data \
+  ghcr.io/yanzhi0922/ferroq:latest
+```
+
+### Pre-built Binaries
+
+Download from [Releases](https://github.com/yanzhi0922/ferroq/releases):
+
+```bash
+# Linux x86_64
+curl -LO https://github.com/yanzhi0922/ferroq/releases/latest/download/ferroq-linux-x86_64.tar.gz
+tar xzf ferroq-linux-x86_64.tar.gz
+chmod +x ferroq
+./ferroq --generate-config
+./ferroq
+```
 
 ### From Source
 

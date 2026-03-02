@@ -1,0 +1,48 @@
+# docker-compose.yml — ferroq 快速启动
+#
+# 使用方法:
+#   1. 复制 config.example.yaml 为 config.yaml 并修改配置
+#   2. docker compose up -d
+#   3. 访问 http://localhost:8080/dashboard/
+#
+# 如需与 Lagrange.OneBot 一起运行，取消注释 lagrange 服务
+
+services:
+  ferroq:
+    image: ghcr.io/yanzhi0922/ferroq:latest
+    # 或本地构建: build: .
+    container_name: ferroq
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data
+    environment:
+      - TZ=Asia/Shanghai
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    # 如使用 Lagrange，取消注释:
+    # depends_on:
+    #   - lagrange
+
+  # Lagrange.OneBot 后端（可选）
+  # lagrange:
+  #   image: ghcr.io/lagrangedev/lagrange.onebot:latest
+  #   container_name: lagrange
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8081:8081"
+  #   volumes:
+  #     - ./lagrange:/app/data
+  #   environment:
+  #     - TZ=Asia/Shanghai
+
+# 持久化数据卷
+volumes:
+  ferroq-data:

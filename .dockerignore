@@ -1,0 +1,27 @@
+# Build artifacts
+target/
+*.rs.bk
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+!README.md
+
+# CI/CD
+.github/
+
+# Test files
+**/tests/
+**/*_test.rs
+
+# Plan files
+PLAN*.md
