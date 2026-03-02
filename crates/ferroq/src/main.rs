@@ -180,6 +180,7 @@ async fn main() -> anyhow::Result<()> {
         config.server.access_token.clone(),
     );
 
+    let metrics_stats = stats.clone();
     let mut app = axum::Router::new()
         .nest("/dashboard", ferroq_web::dashboard_routes())
         .nest("/api", mgmt_router)
@@ -188,6 +189,18 @@ async fn main() -> anyhow::Result<()> {
             axum::routing::get(move || {
                 let s = health_stats.clone();
                 async move { axum::Json(s.health()) }
+            }),
+        )
+        .route(
+            "/metrics",
+            axum::routing::get(move || {
+                let s = metrics_stats.clone();
+                async move {
+                    (
+                        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+                        s.prometheus_metrics(),
+                    )
+                }
             }),
         );
 
@@ -202,6 +215,7 @@ async fn main() -> anyhow::Result<()> {
             let ob_router = server.build_router(
                 runtime.router().clone(),
                 runtime.bus().raw_sender(),
+                runtime.stats().clone(),
             );
             app = app.nest("/onebot/v11", ob_router);
 

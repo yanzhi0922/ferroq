@@ -100,8 +100,8 @@ const DASHBOARD_HTML: &str = r##"<!DOCTYPE html>
       <div class="value" id="api-calls">0</div>
     </div>
     <div class="stat-card">
-      <div class="label">WS Connections</div>
-      <div class="value" id="ws-conns">0</div>
+      <div class="label">WS Active / Total</div>
+      <div class="value" id="ws-conns">0 / 0</div>
     </div>
     <div class="stat-card">
       <div class="label">Messages Stored</div>
@@ -160,7 +160,7 @@ async function refresh() {
     document.getElementById('uptime').textContent = formatUptime(data.uptime_secs);
     document.getElementById('events').textContent = formatNumber(data.events_total);
     document.getElementById('api-calls').textContent = formatNumber(data.api_calls_total);
-    document.getElementById('ws-conns').textContent = data.ws_connections;
+    document.getElementById('ws-conns').textContent = data.ws_connections + ' / ' + formatNumber(data.ws_connections_total);
     document.getElementById('msgs-stored').textContent = formatNumber(data.messages_stored);
     document.getElementById('storage-status').textContent = data.storage_enabled ? 'Enabled' : 'Disabled';
     document.getElementById('storage-status').style.color = data.storage_enabled ? 'var(--green)' : 'var(--text-dim)';

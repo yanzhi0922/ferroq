@@ -27,6 +27,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::onebot_v11 as parser;
 use crate::router::ApiRouter;
+use crate::stats::RuntimeStats;
 
 /// Shared state for the axum handlers.
 #[allow(dead_code)]
@@ -34,6 +35,7 @@ struct ServerState {
     router: Arc<ApiRouter>,
     bus_tx: broadcast::Sender<Event>,
     access_token: String,
+    stats: Arc<RuntimeStats>,
 }
 
 /// OneBot v11 inbound protocol server.
@@ -64,11 +66,13 @@ impl OneBotV11Server {
         &self,
         router: Arc<ApiRouter>,
         bus_tx: broadcast::Sender<Event>,
+        stats: Arc<RuntimeStats>,
     ) -> axum::Router {
         let state = Arc::new(ServerState {
             router,
             bus_tx,
             access_token: self.access_token.clone(),
+            stats,
         });
 
         let mut app = axum::Router::new();
@@ -199,6 +203,7 @@ async fn handle_http_api(
         self_id: None,
     };
 
+    state.stats.record_api_call();
     match state.router.route(request).await {
         Ok(resp) => Json(resp).into_response(),
         Err(e) => {
@@ -227,6 +232,7 @@ async fn handle_http_api_legacy(
         }
     };
 
+    state.stats.record_api_call();
     match state.router.route(request).await {
         Ok(resp) => Json(resp).into_response(),
         Err(e) => {
@@ -260,7 +266,9 @@ async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
     let (ws_tx, mut ws_rx) = socket.split();
     let mut event_rx = state.bus_tx.subscribe();
     let router = Arc::clone(&state.router);
+    let stats = Arc::clone(&state.stats);
 
+    stats.ws_connect();
     info!("new OneBot v11 forward WS client connected");
 
     // Shared writer channel — both event push and API responses write through this.
@@ -313,9 +321,11 @@ async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
                 let echo = request.echo.clone();
                 let msg_tx_resp = msg_tx.clone();
                 let router_clone = Arc::clone(&router);
+                let stats_clone = Arc::clone(&stats);
 
                 // Process API call and send response back on the same WS.
                 tokio::spawn(async move {
+                    stats_clone.record_api_call();
                     let resp = match router_clone.route(request).await {
                         Ok(mut r) => {
                             r.echo = echo;
@@ -334,6 +344,7 @@ async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
 
     push_task.abort();
     writer_task.abort();
+    stats.ws_disconnect();
     info!("OneBot v11 forward WS client disconnected");
 }
 
