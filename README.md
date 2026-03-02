@@ -44,7 +44,7 @@ Instead of reimplementing the QQ protocol, ferroq acts as a **unified proxy / ro
 │                      Bot Frameworks                       │
 │        NoneBot2 / Koishi / Yunzai / Custom Bot            │
 └─────────────────────────┬────────────────────────────────┘
-                          │  OneBot v11 / v12 / Milky / Satori
+                          │  OneBot v11 / v12 / Satori
                           ▼
 ┌──────────────────────────────────────────────────────────┐
 │                     ⚡ ferroq                             │
@@ -54,14 +54,17 @@ Instead of reimplementing the QQ protocol, ferroq acts as a **unified proxy / ro
 │  │ (inbound)    │  │          │  │ (outbound)         │ │
 │  │              │  │          │  │                    │ │
 │  │ • OneBot v11 │  │ broadcast│  │ • Lagrange WS      │ │
-│  │ • OneBot v12 │  │ + route  │  │ • NapCat WS        │ │
-│  │ • Milky      │  │          │  │ • Official API     │ │
-│  │ • Satori     │  │          │  │                    │ │
+│  │ • OneBot v12 │  │ + dedup  │  │ • NapCat WS        │ │
+│  │ • Satori     │  │ + plugin │  │ • Official API     │ │
+│  │              │  │          │  │                    │ │
 │  └──────────────┘  └──────────┘  └────────────────────┘ │
 │  ┌──────────┐  ┌────────────┐  ┌────────────────────┐   │
 │  │Dashboard │  │ Management │  │ Message Storage    │   │
 │  │ (Web UI) │  │ API (/api) │  │ (SQLite)           │   │
 │  └──────────┘  └────────────┘  └────────────────────┘   │
+│  ┌──────────────────────────────────────────────────┐    │
+│  │         WASM Plugin Engine (wasmtime)            │    │
+│  └──────────────────────────────────────────────────┘    │
 └──────────────────────────────────────────────────────────┘
                           │
                           ▼
@@ -173,35 +176,36 @@ See [config.example.yaml](config.example.yaml) for the full configuration refere
 | `POST /api/reload` | Hot-reload access token and rate-limit params |
 | `POST /onebot/v11/api/:action` | OneBot v11 HTTP API |
 | `WS /onebot/v11/ws` | OneBot v11 forward WebSocket |
+| `POST /onebot/v12/api/:action` | OneBot v12 HTTP API |
+| `WS /onebot/v12/ws` | OneBot v12 WebSocket |
+| `POST /satori/v1/` | Satori HTTP API |
+| `WS /satori/v1/events` | Satori event WebSocket |
 
 ## Performance
 
-| Metric | ferroq | go-cqhttp | Overflow |
-|--------|--------|-----------|----------|
-| Event forwarding latency | <1ms | ~5ms | ~3ms |
-| Memory usage (idle) | ~8MB | ~30MB | ~50MB |
-| Binary size | ~15MB | ~25MB | ~40MB |
-| Concurrent connections | 10,000+ | ~1,000 | ~500 |
+Measured with [criterion](https://github.com/bheisler/criterion.rs) on real code paths:
 
-*Benchmarks coming soon — numbers are design targets.*
+| Metric | Value |
+|--------|-------|
+| End-to-end pipeline latency (small event) | **17.5 µs** |
+| End-to-end pipeline latency (1KB event) | **37.8 µs** |
+| Event bus throughput | **2.16M msg/s** |
+| Event parse (OneBot v11) | **2.6 µs** |
+| Dedup filter check | **670 ns** |
+| Memory (idle) | **4.9 MB** |
+| Memory (100K events processed) | **10 MB** |
+
+See [BENCHMARK.md](BENCHMARK.md) for full results, methodology, and how to reproduce.
 
 ## Roadmap
 
-- [x] **Phase 1** — Core skeleton: traits, config, error types
-- [x] **Phase 2** — Lagrange adapter + event bus + OneBot v11 HTTP/WS server
-- [x] **Phase 3.1** — Integration tests + mock backend + forward WS pipeline
-- [x] **Phase 3.2** — Config validation + web dashboard + health API
-- [x] **Phase 3.3** — SQLite message storage + management REST API
-- [x] **Phase 3.4** — Auth middleware + rate limiting + hot-reload + Prometheus
-- [x] **Phase 3.5** — Exponential backoff reconnect + per-adapter counters + configurable timeouts
-- [x] **Phase 3.6** — Per-adapter API metrics + route_named + dashboard columns + Retry-After
-- [x] **Phase 3.7** — Management API tests + testing hardening + documentation
-- [x] **Phase 3.8** — Failover adapters + adapter type accuracy
-- [x] **Phase 3.9** — Event deduplication + reverse WS exponential backoff
-- [x] **Phase 4.0** — Dynamic adapter management via REST API
-- [ ] **Phase 4** — Multi-account routing + failover + NapCat adapter
-- [ ] **Phase 5** — OneBot v12 / Milky / Satori protocol servers
-- [ ] **Phase 6** — Plugin system + benchmarks + release
+- [x] **Phase 1** — Core types, traits, config, error handling
+- [x] **Phase 2** — Gateway infrastructure: adapters, event bus, router, storage, auth, rate limiting, dashboard, management API, failover, dedup
+- [x] **Phase 3.1** — WASM plugin system (wasmtime sandbox)
+- [x] **Phase 3.2** — Multi-protocol servers: OneBot v11, OneBot v12, Satori
+- [x] **Phase 3.3** — Performance benchmark suite (criterion)
+- [x] **Phase 3.4** — Bilingual documentation site (mdbook)
+- [ ] **v1.0.0** — Production release
 
 ## Project Structure
 
@@ -212,18 +216,21 @@ ferroq/
 │   ├── ferroq-gateway/    # Gateway: adapters, bus, router, stats, storage, management
 │   │   ├── src/
 │   │   │   ├── adapter/   # Backend adapters (Lagrange, ...)
-│   │   │   ├── server/    # Protocol servers (OneBot v11, ...)
+│   │   │   ├── server/    # Protocol servers (OneBot v11/v12, Satori)
 │   │   │   ├── bus.rs     # Event bus (broadcast)
 │   │   │   ├── router.rs  # API request router (self_id → adapter)
 │   │   │   ├── stats.rs   # Runtime stats + health + Prometheus
 │   │   │   ├── storage.rs # SQLite message store
 │   │   │   ├── management.rs  # REST management API
 │   │   │   ├── middleware.rs   # Auth + rate limiting
+│   │   │   ├── plugin_engine.rs # WASM plugin runtime (wasmtime)
 │   │   │   └── runtime.rs # Gateway lifecycle orchestration
 │   │   └── tests/         # Integration tests with mock backend
 │   ├── ferroq-web/        # Embedded web dashboard
 │   └── ferroq/            # CLI binary entry point
 ├── config.example.yaml    # Full configuration reference
+├── docs/                  # mdbook documentation (en + zh)
+├── BENCHMARK.md           # Performance benchmark results
 ├── .github/workflows/     # CI: check, clippy, test (Linux/Windows/macOS), fmt
 └── Cargo.toml             # Workspace root
 ```
@@ -231,7 +238,7 @@ ferroq/
 ## Testing
 
 ```bash
-# Run all tests (73 total: 16 core + 52 gateway + 5 integration)
+# Run all tests (96 total)
 cargo test --workspace
 
 # Run with clippy
