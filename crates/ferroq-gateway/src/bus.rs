@@ -30,7 +30,10 @@ impl EventBus {
     pub fn publish(&self, event: Event) {
         let receiver_count = self.sender.receiver_count();
         if receiver_count == 0 {
-            debug!("event dropped (no subscribers): self_id={}", event.self_id());
+            debug!(
+                "event dropped (no subscribers): self_id={}",
+                event.self_id()
+            );
             return;
         }
         if let Err(e) = self.sender.send(event) {
@@ -65,8 +68,8 @@ impl Default for EventBus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ferroq_core::event::{MetaEvent, Event};
     use chrono::Utc;
+    use ferroq_core::event::{Event, MetaEvent};
     use uuid::Uuid;
 
     #[tokio::test]

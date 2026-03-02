@@ -57,11 +57,7 @@ impl ApiRouter {
 
     /// List the names of all registered adapters.
     pub fn list_names(&self) -> Vec<String> {
-        self.adapters
-            .read()
-            .iter()
-            .map(|a| a.info().name)
-            .collect()
+        self.adapters.read().iter().map(|a| a.info().name).collect()
     }
 
     /// Unregister an adapter by name.

@@ -10,12 +10,12 @@
 
 use std::sync::Arc;
 
+use axum::Json;
 use axum::extract::ws::{Message as AxumWsMessage, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{any, post};
-use axum::Json;
 use ferroq_core::api::{ApiRequest, ApiResponse};
 use ferroq_core::config::{OneBotV11Config, WsReverseTarget};
 use ferroq_core::event::Event;
@@ -31,7 +31,6 @@ use crate::shared_config::SharedConfig;
 use crate::stats::RuntimeStats;
 
 /// Shared state for the axum handlers.
-#[allow(dead_code)]
 struct ServerState {
     router: Arc<ApiRouter>,
     bus_tx: broadcast::Sender<Event>,
@@ -439,7 +438,9 @@ async fn reverse_ws_task(
                                         r.echo = echo;
                                         r
                                     }
-                                    Err(e) => ApiResponse::fail(1400, e.to_string()).with_echo(echo),
+                                    Err(e) => {
+                                        ApiResponse::fail(1400, e.to_string()).with_echo(echo)
+                                    }
                                 };
                                 let text = serde_json::to_string(&resp).unwrap_or_default();
                                 let _ = msg_tx_resp.send(text);
@@ -487,10 +488,7 @@ async fn reverse_ws_writer(
 fn build_reverse_ws_request(
     target: &WsReverseTarget,
     access_token: &str,
-) -> Result<
-    tokio_tungstenite::tungstenite::http::Request<()>,
-    String,
-> {
+) -> Result<tokio_tungstenite::tungstenite::http::Request<()>, String> {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use tokio_tungstenite::tungstenite::http::HeaderValue;
 
@@ -524,11 +522,7 @@ fn build_reverse_ws_request(
 ///
 /// If `secret` is non-empty, signs each payload with HMAC-SHA1 and adds
 /// an `X-Signature` header as `sha1=<hex>` per OneBot v11 spec.
-async fn http_post_task(
-    url: String,
-    secret: String,
-    mut event_rx: broadcast::Receiver<Event>,
-) {
+async fn http_post_task(url: String, secret: String, mut event_rx: broadcast::Receiver<Event>) {
     use hmac::{Hmac, Mac};
     use sha1::Sha1;
 

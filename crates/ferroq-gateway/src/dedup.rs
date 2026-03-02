@@ -131,24 +131,20 @@ impl DedupFilter {
                     &n.extra,
                 )
             }
-            Event::Request(r) => {
-                Self::hash_non_message(
-                    r.self_id,
-                    &r.request_type,
-                    &r.sub_type,
-                    r.time.timestamp(),
-                    &r.extra,
-                )
-            }
-            Event::Meta(m) => {
-                Self::hash_non_message(
-                    m.self_id,
-                    &m.meta_event_type,
-                    &m.sub_type,
-                    m.time.timestamp(),
-                    &m.extra,
-                )
-            }
+            Event::Request(r) => Self::hash_non_message(
+                r.self_id,
+                &r.request_type,
+                &r.sub_type,
+                r.time.timestamp(),
+                &r.extra,
+            ),
+            Event::Meta(m) => Self::hash_non_message(
+                m.self_id,
+                &m.meta_event_type,
+                &m.sub_type,
+                m.time.timestamp(),
+                &m.extra,
+            ),
         }
     }
 
@@ -250,7 +246,10 @@ mod tests {
         let ev2 = make_message_event(100, 1001);
 
         assert!(!filter.is_duplicate(&ev1), "first event should pass");
-        assert!(filter.is_duplicate(&ev2), "same message_id should be duplicate");
+        assert!(
+            filter.is_duplicate(&ev2),
+            "same message_id should be duplicate"
+        );
         assert_eq!(filter.duplicates_total(), 1);
         assert_eq!(filter.checked_total(), 2);
     }

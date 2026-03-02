@@ -4,8 +4,8 @@
 //! receives OneBot v11 events, and forwards API calls.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -18,10 +18,10 @@ use futures::{SinkExt, StreamExt};
 use parking_lot::Mutex;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
+use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
-use tokio_tungstenite::tungstenite::Message as WsMessage;
-use tokio_tungstenite::{connect_async, MaybeTlsStream};
+use tokio_tungstenite::{MaybeTlsStream, connect_async};
 use tracing::{debug, error, info, warn};
 
 use super::super::onebot_v11;
@@ -58,8 +58,7 @@ pub struct LagrangeAdapter {
     max_reconnect_interval: Duration,
     connect_timeout: Duration,
     api_timeout: Duration,
-    #[allow(dead_code)]
-    health_check_interval: Duration,
+    _health_check_interval: Duration,
     inner: Arc<Mutex<Inner>>,
     echo_counter: AtomicU64,
 }
@@ -85,7 +84,7 @@ impl LagrangeAdapter {
             max_reconnect_interval: Duration::from_secs(max_reconnect_interval_secs),
             connect_timeout: Duration::from_secs(connect_timeout_secs),
             api_timeout: Duration::from_secs(api_timeout_secs),
-            health_check_interval: Duration::from_secs(health_check_interval_secs),
+            _health_check_interval: Duration::from_secs(health_check_interval_secs),
             inner: Arc::new(Mutex::new(Inner {
                 state: AdapterState::Disconnected,
                 self_id: None,
@@ -120,7 +119,9 @@ impl LagrangeAdapter {
     }
 
     /// Build a WebSocket request with optional auth header.
-    fn build_request(&self) -> Result<tokio_tungstenite::tungstenite::http::Request<()>, GatewayError> {
+    fn build_request(
+        &self,
+    ) -> Result<tokio_tungstenite::tungstenite::http::Request<()>, GatewayError> {
         let mut request = self
             .url
             .as_str()
@@ -142,24 +143,20 @@ impl LagrangeAdapter {
     /// Returns split (write, read) halves.
     async fn establish_ws(
         &self,
-    ) -> Result<
-        (
-            SplitSink<WsStream, WsMessage>,
-            SplitStream<WsStream>,
-        ),
-        GatewayError,
-    > {
+    ) -> Result<(SplitSink<WsStream, WsMessage>, SplitStream<WsStream>), GatewayError> {
         let request = self.build_request()?;
         let timeout = self.connect_timeout;
         info!(url = %self.url, name = %self.name, timeout_secs = timeout.as_secs(), "connecting to Lagrange backend");
 
-        let (ws_stream, _response) = tokio::time::timeout(
-            timeout,
-            connect_async(request),
-        )
-        .await
-        .map_err(|_| GatewayError::Connection(format!("websocket connect timed out after {}s", timeout.as_secs())))?
-        .map_err(|e| GatewayError::Connection(format!("websocket connect failed: {e}")))?;
+        let (ws_stream, _response) = tokio::time::timeout(timeout, connect_async(request))
+            .await
+            .map_err(|_| {
+                GatewayError::Connection(format!(
+                    "websocket connect timed out after {}s",
+                    timeout.as_secs()
+                ))
+            })?
+            .map_err(|e| GatewayError::Connection(format!("websocket connect failed: {e}")))?;
 
         info!(url = %self.url, name = %self.name, "connected to Lagrange backend");
         Ok(ws_stream.split())
@@ -185,11 +182,8 @@ impl LagrangeAdapter {
         // Reader task: reads from WS, classifies messages as events or API responses.
         let inner_clone = Arc::clone(&inner);
         let name_clone = name.clone();
-        let reader_handle = tokio::spawn(Self::reader_loop(
-            ws_read,
-            inner_clone,
-            name_clone.clone(),
-        ));
+        let reader_handle =
+            tokio::spawn(Self::reader_loop(ws_read, inner_clone, name_clone.clone()));
 
         // Store handles.
         let mut guard = inner.lock();
@@ -244,10 +238,7 @@ impl LagrangeAdapter {
                 tokio::time::sleep(delay).await;
 
                 // Try to connect.
-                let mut request = match url
-                    .as_str()
-                    .into_client_request()
-                {
+                let mut request = match url.as_str().into_client_request() {
                     Ok(r) => r,
                     Err(e) => {
                         error!(name = %adapter_name, "invalid url on reconnect: {e}");
@@ -257,15 +248,14 @@ impl LagrangeAdapter {
                 };
 
                 if !adapter_access_token.is_empty() {
-                    if let Ok(v) = HeaderValue::from_str(&format!("Bearer {}", adapter_access_token)) {
+                    if let Ok(v) =
+                        HeaderValue::from_str(&format!("Bearer {}", adapter_access_token))
+                    {
                         request.headers_mut().insert("Authorization", v);
                     }
                 }
 
-                match tokio::time::timeout(
-                    connect_timeout,
-                    connect_async(request),
-                ).await {
+                match tokio::time::timeout(connect_timeout, connect_async(request)).await {
                     Ok(Ok((ws_stream, _))) => {
                         info!(name = %adapter_name, attempts = attempt + 1, "reconnected to Lagrange backend");
                         let (ws_w, ws_r) = ws_stream.split();
@@ -397,10 +387,7 @@ impl LagrangeAdapter {
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown")
                 .to_string(),
-            retcode: json
-                .get("retcode")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(-1) as i32,
+            retcode: json.get("retcode").and_then(|v| v.as_i64()).unwrap_or(-1) as i32,
             data: json.get("data").cloned().unwrap_or(serde_json::Value::Null),
             message: json
                 .get("message")
@@ -513,8 +500,7 @@ impl BackendAdapter for LagrangeAdapter {
         // Set the echo field on the request.
         request.echo = Some(serde_json::Value::String(echo.clone()));
 
-        let json = serde_json::to_string(&request)
-            .map_err(GatewayError::Serialization)?;
+        let json = serde_json::to_string(&request).map_err(GatewayError::Serialization)?;
 
         let (resp_tx, resp_rx) = oneshot::channel();
 
@@ -524,19 +510,21 @@ impl BackendAdapter for LagrangeAdapter {
             if guard.state != AdapterState::Connected {
                 return Err(GatewayError::Connection(format!(
                     "adapter '{}' is not connected (state: {})",
-                    self.name,
-                    guard.state
+                    self.name, guard.state
                 )));
             }
 
             guard.pending_calls.insert(echo.clone(), resp_tx);
 
             if let Some(tx) = &guard.ws_writer_tx {
-                tx.send(WsMessage::Text(json.into()))
-                    .map_err(|_| GatewayError::Connection("ws writer channel closed".to_string()))?;
+                tx.send(WsMessage::Text(json.into())).map_err(|_| {
+                    GatewayError::Connection("ws writer channel closed".to_string())
+                })?;
             } else {
                 guard.pending_calls.remove(&echo);
-                return Err(GatewayError::Connection("no ws writer available".to_string()));
+                return Err(GatewayError::Connection(
+                    "no ws writer available".to_string(),
+                ));
             }
         }
 
@@ -553,7 +541,8 @@ impl BackendAdapter for LagrangeAdapter {
                 guard.pending_calls.remove(&echo);
                 Err(GatewayError::Connection(format!(
                     "API call '{}' timed out after {}s",
-                    request.action, timeout.as_secs()
+                    request.action,
+                    timeout.as_secs()
                 )))
             }
         }

@@ -8,8 +8,8 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use tracing::info;
-use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::prelude::*;
 
 /// ferroq — High-performance QQ Bot unified gateway
 #[derive(Parser, Debug)]
@@ -45,7 +45,9 @@ async fn main() -> anyhow::Result<()> {
     let log_level_override = cli.log_level.clone();
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         let level = log_level_override.as_deref().unwrap_or("info");
-        EnvFilter::new(format!("ferroq={level},ferroq_core={level},ferroq_gateway={level},ferroq_web={level}"))
+        EnvFilter::new(format!(
+            "ferroq={level},ferroq_core={level},ferroq_gateway={level},ferroq_web={level}"
+        ))
     });
 
     // Load config first (before full tracing init) to check logging.file.
@@ -122,7 +124,10 @@ async fn main() -> anyhow::Result<()> {
     if ferroq_core::validation::has_errors(&issues) {
         anyhow::bail!(
             "configuration has {} error(s) — fix them and restart",
-            issues.iter().filter(|i| i.severity == ferroq_core::validation::Severity::Error).count()
+            issues
+                .iter()
+                .filter(|i| i.severity == ferroq_core::validation::Severity::Error)
+                .count()
         );
     }
 
@@ -138,27 +143,30 @@ async fn main() -> anyhow::Result<()> {
 
     // Instantiate backend adapters from config.
     for account in &config.accounts {
-        let primary: std::sync::Arc<dyn ferroq_core::adapter::BackendAdapter> =
-            match account.backend.backend_type.as_str() {
-                "lagrange" | "napcat" => {
-                    // Both Lagrange and NapCat expose an OneBot v11 forward WS endpoint.
-                    let adapter = ferroq_gateway::adapter::LagrangeAdapter::from_backend_config(
-                        &account.name,
-                        &account.backend,
-                    );
-                    info!(
-                        name = %account.name,
-                        backend = %account.backend.backend_type,
-                        url = %account.backend.url,
-                        "created backend adapter"
-                    );
-                    std::sync::Arc::new(adapter)
-                }
-                other => {
-                    tracing::warn!(name = %account.name, backend = %other, "unknown backend type, skipping");
-                    continue;
-                }
-            };
+        let primary: std::sync::Arc<dyn ferroq_core::adapter::BackendAdapter> = match account
+            .backend
+            .backend_type
+            .as_str()
+        {
+            "lagrange" | "napcat" => {
+                // Both Lagrange and NapCat expose an OneBot v11 forward WS endpoint.
+                let adapter = ferroq_gateway::adapter::LagrangeAdapter::from_backend_config(
+                    &account.name,
+                    &account.backend,
+                );
+                info!(
+                    name = %account.name,
+                    backend = %account.backend.backend_type,
+                    url = %account.backend.url,
+                    "created backend adapter"
+                );
+                std::sync::Arc::new(adapter)
+            }
+            other => {
+                tracing::warn!(name = %account.name, backend = %other, "unknown backend type, skipping");
+                continue;
+            }
+        };
 
         // If a fallback backend is configured, wrap primary + fallback in a FailoverAdapter.
         let adapter: std::sync::Arc<dyn ferroq_core::adapter::BackendAdapter> =
@@ -194,13 +202,11 @@ async fn main() -> anyhow::Result<()> {
                     primary
                 } else {
                     info!(name = %account.name, "failover enabled");
-                    std::sync::Arc::new(
-                        ferroq_gateway::adapter::FailoverAdapter::new(
-                            &account.name,
-                            primary,
-                            fallback,
-                        ),
-                    )
+                    std::sync::Arc::new(ferroq_gateway::adapter::FailoverAdapter::new(
+                        &account.name,
+                        primary,
+                        fallback,
+                    ))
                 }
             } else {
                 primary
@@ -211,32 +217,31 @@ async fn main() -> anyhow::Result<()> {
 
     // Protocol servers are instantiated below based on config.
 
-    runtime.start().await?;
-
-    // Create the dynamic adapter manager for runtime add/remove/reconnect.
-    let adapter_manager = std::sync::Arc::new(
-        ferroq_gateway::adapter_manager::AdapterManager::new(
+    // Create the adapter manager before starting the runtime so that startup
+    // adapters are registered with it (enabling management API operations on
+    // all adapters, not just dynamically added ones).
+    let adapter_manager =
+        std::sync::Arc::new(ferroq_gateway::adapter_manager::AdapterManager::new(
             runtime.bus().clone(),
             runtime.router().clone(),
             runtime.stats().clone(),
             runtime.dedup().clone(),
-        ),
-    );
+        ));
+
+    runtime.start(&adapter_manager).await?;
 
     // Build the HTTP server (dashboard + management API + protocol servers)
     let stats = runtime.stats().clone();
     let health_stats = stats.clone();
 
     // Shared runtime-mutable config (for hot-reload).
-    let shared_config = std::sync::Arc::new(
-        ferroq_gateway::shared_config::SharedConfig::new(config.server.access_token.clone()),
-    );
+    let shared_config = std::sync::Arc::new(ferroq_gateway::shared_config::SharedConfig::new(
+        config.server.access_token.clone(),
+    ));
 
     // Optional global rate limiter — created upfront so management can reference it.
     let rate_limiter = if config.server.rate_limit.enabled {
-        let limiter = ferroq_gateway::middleware::RateLimiter::new(
-            config.server.rate_limit.burst,
-        );
+        let limiter = ferroq_gateway::middleware::RateLimiter::new(config.server.rate_limit.burst);
         limiter.start_refill(config.server.rate_limit.requests_per_second);
         info!(
             rps = config.server.rate_limit.requests_per_second,
@@ -279,7 +284,10 @@ async fn main() -> anyhow::Result<()> {
                 let s = metrics_stats.clone();
                 async move {
                     (
-                        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+                        [(
+                            axum::http::header::CONTENT_TYPE,
+                            "text/plain; version=0.0.4; charset=utf-8",
+                        )],
                         s.prometheus_metrics(),
                     )
                 }
@@ -326,9 +334,7 @@ async fn main() -> anyhow::Result<()> {
     // HTTP request/response tracing.
     let trace_layer = tower_http::trace::TraceLayer::new_for_http()
         .make_span_with(tower_http::trace::DefaultMakeSpan::new().level(tracing::Level::INFO))
-        .on_response(
-            tower_http::trace::DefaultOnResponse::new().level(tracing::Level::INFO),
-        );
+        .on_response(tower_http::trace::DefaultOnResponse::new().level(tracing::Level::INFO));
 
     // Apply optional rate limit middleware.
     let app = if let Some(ref limiter) = rate_limiter {
@@ -347,12 +353,12 @@ async fn main() -> anyhow::Result<()> {
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 
-    runtime.shutdown().await?;
-    adapter_manager.shutdown().await;
-    // Stop OneBot v11 background tasks.
+    // Shut down in order: protocol servers → adapters → runtime background tasks.
     if let Some(ref server) = onebot_v11_server {
         server.stop_background_tasks();
     }
+    adapter_manager.shutdown().await;
+    runtime.shutdown().await?;
     info!("ferroq shut down cleanly");
     Ok(())
 }

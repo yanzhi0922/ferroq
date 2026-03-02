@@ -11,6 +11,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
+use crate::adapter_manager::AdapterManager;
 use crate::bus::EventBus;
 use crate::dedup::DedupFilter;
 use crate::router::ApiRouter;
@@ -27,8 +28,6 @@ pub struct GatewayRuntime {
     dedup: Option<Arc<DedupFilter>>,
     adapters: Vec<Arc<dyn BackendAdapter>>,
     servers: Vec<Box<dyn ProtocolServer>>,
-    /// Handles for the event forwarding tasks (adapter → bus).
-    forward_handles: Vec<JoinHandle<()>>,
     /// Handle for the periodic stats refresher.
     stats_handle: Option<JoinHandle<()>>,
     /// Handle for the storage cleanup task.
@@ -63,7 +62,10 @@ impl GatewayRuntime {
 
         // Event deduplication filter — enabled by default, crucial for failover.
         let dedup = if config.dedup.enabled {
-            info!(window_secs = config.dedup.window_secs, "event deduplication enabled");
+            info!(
+                window_secs = config.dedup.window_secs,
+                "event deduplication enabled"
+            );
             Some(Arc::new(DedupFilter::new(config.dedup.window_secs)))
         } else {
             None
@@ -78,7 +80,6 @@ impl GatewayRuntime {
             dedup,
             adapters: Vec::new(),
             servers: Vec::new(),
-            forward_handles: Vec::new(),
             stats_handle: None,
             cleanup_handle: None,
             persist_handle: None,
@@ -125,15 +126,17 @@ impl GatewayRuntime {
         &self.config
     }
 
-    /// Connect all registered adapters and start forwarding events to the bus.
-    pub async fn start(&mut self) -> Result<(), GatewayError> {
+    /// Connect all registered adapters via the adapter manager and start
+    /// background tasks (stats, persistence, cleanup).
+    pub async fn start(&mut self, manager: &AdapterManager) -> Result<(), GatewayError> {
         info!(
             adapters = self.adapters.len(),
             servers = self.servers.len(),
             "starting ferroq gateway"
         );
 
-        // Connect each adapter and register it with the router.
+        // Connect each adapter and register it with the adapter manager
+        // (which handles forwarding, router registration, and lifecycle).
         for adapter in &self.adapters {
             let (event_tx, event_rx) = mpsc::unbounded_channel::<Event>();
 
@@ -155,16 +158,12 @@ impl GatewayRuntime {
             // Register the adapter with the API router.
             self.router.register(Arc::clone(adapter));
 
-            // Spawn a task that forwards events from this adapter to the bus.
-            let bus = Arc::clone(&self.bus);
-            let stats = Arc::clone(&self.stats);
-            let dedup = self.dedup.clone();
-            let adapter_name = adapter.info().name.clone();
-            let handle = tokio::spawn(Self::forward_events(event_rx, bus, stats, dedup, adapter_name));
-            self.forward_handles.push(handle);
+            // Hand off to the adapter manager for event forwarding and lifecycle tracking.
+            manager.register_running(Arc::clone(adapter), event_rx);
         }
 
         // Spawn periodic stats refresher + health checker + dynamic self_id association (every 5s).
+        // Uses the adapter manager to enumerate all adapters (including dynamically added ones).
         let adapters_for_stats: Vec<Arc<dyn BackendAdapter>> =
             self.adapters.iter().map(Arc::clone).collect();
         let stats_clone = Arc::clone(&self.stats);
@@ -253,8 +252,7 @@ impl GatewayRuntime {
             }));
 
             // Spawn hourly cleanup.
-            self.cleanup_handle =
-                Some(crate::storage::spawn_cleanup_task(Arc::clone(store)));
+            self.cleanup_handle = Some(crate::storage::spawn_cleanup_task(Arc::clone(store)));
 
             info!("message persistence task started");
         }
@@ -263,52 +261,13 @@ impl GatewayRuntime {
         Ok(())
     }
 
-    /// Forward events from an adapter's channel to the event bus.
-    async fn forward_events(
-        mut event_rx: mpsc::UnboundedReceiver<Event>,
-        bus: Arc<EventBus>,
-        stats: Arc<RuntimeStats>,
-        dedup: Option<Arc<DedupFilter>>,
-        adapter_name: String,
-    ) {
-        let mut count: u64 = 0;
-        while let Some(event) = event_rx.recv().await {
-            // Deduplication check — drop if this event was already seen.
-            if let Some(ref filter) = dedup {
-                if filter.is_duplicate(&event) {
-                    stats.record_event_deduplicated();
-                    continue;
-                }
-            }
-            count += 1;
-            stats.record_event_for(&adapter_name);
-            if count % 1000 == 0 {
-                info!(
-                    adapter = %adapter_name,
-                    total_events = count,
-                    "event forwarding progress"
-                );
-            }
-            bus.publish(event);
-        }
-        warn!(adapter = %adapter_name, total = count, "event forwarding channel closed");
-    }
-
-    /// Gracefully shut down all components.
+    /// Gracefully shut down background tasks.
+    ///
+    /// Adapter disconnection and forwarding abort are handled by
+    /// `AdapterManager::shutdown()` — this method only stops the runtime's
+    /// own background tasks (stats, persistence, cleanup).
     pub async fn shutdown(&mut self) -> Result<(), GatewayError> {
         info!("shutting down ferroq gateway");
-
-        // Disconnect all adapters.
-        for adapter in &self.adapters {
-            if let Err(e) = adapter.disconnect().await {
-                error!(name = %adapter.info().name, error = %e, "error disconnecting adapter");
-            }
-        }
-
-        // Abort forwarding tasks.
-        for handle in self.forward_handles.drain(..) {
-            handle.abort();
-        }
 
         // Abort stats refresher.
         if let Some(h) = self.stats_handle.take() {

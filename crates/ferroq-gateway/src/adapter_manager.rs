@@ -21,6 +21,7 @@ use tracing::{error, info, warn};
 use crate::adapter::LagrangeAdapter;
 use crate::bus::EventBus;
 use crate::dedup::DedupFilter;
+use crate::forward;
 use crate::router::ApiRouter;
 use crate::stats::RuntimeStats;
 
@@ -59,16 +60,14 @@ impl AdapterManager {
 
     /// Register an already-connected adapter and start its forwarding task.
     ///
-    /// Called during startup for each adapter created from config.
+    /// Called during startup for each adapter created from config so that the
+    /// adapter manager is aware of all adapters (not just dynamically added ones).
     pub fn register_running(
         &self,
         adapter: Arc<dyn BackendAdapter>,
         event_rx: mpsc::UnboundedReceiver<Event>,
-    ) -> JoinHandle<()> {
+    ) {
         let name = adapter.info().name.clone();
-
-        // Register with the API router.
-        self.router.register(Arc::clone(&adapter));
 
         // Spawn event forwarding.
         let handle = self.spawn_forwarder(&name, event_rx);
@@ -80,10 +79,6 @@ impl AdapterManager {
                 forward_handle: handle,
             },
         );
-
-        // Return a dummy handle — caller doesn't need the real one.
-        // The real handle is stored in `self.live`.
-        tokio::spawn(async {})
     }
 
     /// Dynamically add a new adapter from a backend config.
@@ -181,9 +176,9 @@ impl AdapterManager {
         // the lock across awaits (parking_lot guards are !Send).
         let adapter = {
             let mut live = self.live.write();
-            let entry = live.get_mut(name).ok_or_else(|| {
-                GatewayError::Internal(format!("adapter '{}' not found", name))
-            })?;
+            let entry = live
+                .get_mut(name)
+                .ok_or_else(|| GatewayError::Internal(format!("adapter '{}' not found", name)))?;
 
             // Abort old forwarder.
             entry.forward_handle.abort();
@@ -225,6 +220,15 @@ impl AdapterManager {
         self.live.read().keys().cloned().collect()
     }
 
+    /// Return cloned `Arc` references to all live adapters.
+    pub fn adapters(&self) -> Vec<Arc<dyn BackendAdapter>> {
+        self.live
+            .read()
+            .values()
+            .map(|la| Arc::clone(&la.adapter))
+            .collect()
+    }
+
     /// Check if an adapter with the given name exists.
     pub fn has(&self, name: &str) -> bool {
         self.live.read().contains_key(name)
@@ -232,8 +236,7 @@ impl AdapterManager {
 
     /// Disconnect all adapters and abort all forwarding tasks.
     pub async fn shutdown(&self) {
-        let entries: Vec<(String, LiveAdapter)> =
-            self.live.write().drain().collect();
+        let entries: Vec<(String, LiveAdapter)> = self.live.write().drain().collect();
         for (name, entry) in entries {
             entry.forward_handle.abort();
             if let Err(e) = entry.adapter.disconnect().await {
@@ -252,36 +255,12 @@ impl AdapterManager {
         let stats = Arc::clone(&self.stats);
         let dedup = self.dedup.clone();
         let adapter_name = name.to_string();
-        tokio::spawn(Self::forward_events(event_rx, bus, stats, dedup, adapter_name))
-    }
-
-    /// Forward events from an adapter's channel to the event bus (with dedup).
-    async fn forward_events(
-        mut event_rx: mpsc::UnboundedReceiver<Event>,
-        bus: Arc<EventBus>,
-        stats: Arc<RuntimeStats>,
-        dedup: Option<Arc<DedupFilter>>,
-        adapter_name: String,
-    ) {
-        let mut count: u64 = 0;
-        while let Some(event) = event_rx.recv().await {
-            if let Some(ref filter) = dedup {
-                if filter.is_duplicate(&event) {
-                    stats.record_event_deduplicated();
-                    continue;
-                }
-            }
-            count += 1;
-            stats.record_event_for(&adapter_name);
-            if count % 1000 == 0 {
-                info!(
-                    adapter = %adapter_name,
-                    total_events = count,
-                    "event forwarding progress"
-                );
-            }
-            bus.publish(event);
-        }
-        warn!(adapter = %adapter_name, total = count, "event forwarding channel closed");
+        tokio::spawn(forward::forward_events(
+            event_rx,
+            bus,
+            stats,
+            dedup,
+            adapter_name,
+        ))
     }
 }

@@ -3,8 +3,8 @@
 //! - **`access_token_auth`** — Bearer token / query-param authentication.
 //! - **`RateLimiter`** — Global token-bucket rate limiter.
 
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use axum::extract::Request;
 use axum::http::StatusCode;
@@ -40,10 +40,12 @@ pub async fn access_token_auth(
 /// For a dynamically reloadable token, use [`with_dynamic_auth`] instead.
 pub fn with_auth(router: axum::Router, token: String) -> axum::Router {
     let token = Arc::new(token);
-    router.layer(axum::middleware::from_fn(move |request: Request, next: Next| {
-        let t = Arc::clone(&token);
-        async move { check_token(&t, request, next).await }
-    }))
+    router.layer(axum::middleware::from_fn(
+        move |request: Request, next: Next| {
+            let t = Arc::clone(&token);
+            async move { check_token(&t, request, next).await }
+        },
+    ))
 }
 
 /// Wrap a router with access-token authentication backed by [`SharedConfig`].
@@ -51,13 +53,15 @@ pub fn with_auth(router: axum::Router, token: String) -> axum::Router {
 /// The token is read from `SharedConfig` on every request, so changes made via
 /// hot-reload take effect immediately.
 pub fn with_dynamic_auth(router: axum::Router, shared: Arc<SharedConfig>) -> axum::Router {
-    router.layer(axum::middleware::from_fn(move |request: Request, next: Next| {
-        let cfg = Arc::clone(&shared);
-        async move {
-            let token = cfg.access_token();
-            check_token(&token, request, next).await
-        }
-    }))
+    router.layer(axum::middleware::from_fn(
+        move |request: Request, next: Next| {
+            let cfg = Arc::clone(&shared);
+            async move {
+                let token = cfg.access_token();
+                check_token(&token, request, next).await
+            }
+        },
+    ))
 }
 
 async fn check_token(token: &str, request: Request, next: Next) -> Response {
@@ -142,9 +146,11 @@ impl RateLimiter {
                 interval.tick().await;
                 let r = rps_atomic.load(Ordering::Relaxed);
                 let b = burst.load(Ordering::Relaxed);
-                tokens.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                    Some(current.saturating_add(r).min(b))
-                }).ok();
+                tokens
+                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                        Some(current.saturating_add(r).min(b))
+                    })
+                    .ok();
             }
         })
     }
@@ -153,11 +159,7 @@ impl RateLimiter {
     pub fn try_acquire(&self) -> bool {
         self.tokens
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                if current > 0 {
-                    Some(current - 1)
-                } else {
-                    None
-                }
+                if current > 0 { Some(current - 1) } else { None }
             })
             .is_ok()
     }
@@ -175,22 +177,24 @@ impl RateLimiter {
 ///
 /// Returns HTTP 429 when the bucket is empty.
 pub fn with_rate_limit(router: axum::Router, limiter: RateLimiter) -> axum::Router {
-    router.layer(axum::middleware::from_fn(move |request: Request, next: Next| {
-        let rl = limiter.clone();
-        async move {
-            if rl.try_acquire() {
-                next.run(request).await
-            } else {
-                let mut response =
-                    (StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded").into_response();
-                response.headers_mut().insert(
-                    axum::http::header::RETRY_AFTER,
-                    axum::http::HeaderValue::from_static("1"),
-                );
-                response
+    router.layer(axum::middleware::from_fn(
+        move |request: Request, next: Next| {
+            let rl = limiter.clone();
+            async move {
+                if rl.try_acquire() {
+                    next.run(request).await
+                } else {
+                    let mut response =
+                        (StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded").into_response();
+                    response.headers_mut().insert(
+                        axum::http::header::RETRY_AFTER,
+                        axum::http::HeaderValue::from_static("1"),
+                    );
+                    response
+                }
             }
-        }
-    }))
+        },
+    ))
 }
 
 #[cfg(test)]
@@ -337,7 +341,10 @@ mod tests {
 
         // Verify the Retry-After header is present.
         assert_eq!(
-            resp2.headers().get("retry-after").and_then(|v| v.to_str().ok()),
+            resp2
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok()),
             Some("1"),
         );
     }

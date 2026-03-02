@@ -13,6 +13,7 @@ pub mod adapter;
 pub mod adapter_manager;
 pub mod bus;
 pub mod dedup;
+pub mod forward;
 pub mod management;
 pub mod middleware;
 pub mod onebot_v11;

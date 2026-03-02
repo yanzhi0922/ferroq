@@ -14,7 +14,7 @@ use ferroq_core::config::StorageConfig;
 use ferroq_core::error::GatewayError;
 use ferroq_core::event::MessageEvent;
 use parking_lot::Mutex;
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, warn};
 
@@ -24,6 +24,29 @@ pub struct MessageStore {
     conn: Arc<Mutex<Connection>>,
     max_days: u32,
 }
+
+/// SQL schema for the messages table and its indexes.
+const SCHEMA_SQL: &str = "
+    CREATE TABLE IF NOT EXISTS messages (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        time            TEXT    NOT NULL,
+        self_id         INTEGER NOT NULL,
+        message_type    TEXT    NOT NULL,
+        message_id      INTEGER NOT NULL,
+        user_id         INTEGER NOT NULL,
+        group_id        INTEGER,
+        raw_message     TEXT    NOT NULL DEFAULT '',
+        sender_nickname TEXT    NOT NULL DEFAULT '',
+        raw_json        TEXT    NOT NULL,
+        created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_messages_time ON messages(time);
+    CREATE INDEX IF NOT EXISTS idx_messages_self_id ON messages(self_id);
+    CREATE INDEX IF NOT EXISTS idx_messages_group_id ON messages(group_id);
+    CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id);
+    CREATE INDEX IF NOT EXISTS idx_messages_message_id ON messages(message_id);
+";
 
 /// A stored message row returned from queries.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,28 +117,8 @@ impl MessageStore {
         .map_err(|e| GatewayError::Storage(format!("pragma setup failed: {e}")))?;
 
         // Create table if not exists.
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS messages (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                time            TEXT    NOT NULL,
-                self_id         INTEGER NOT NULL,
-                message_type    TEXT    NOT NULL,
-                message_id      INTEGER NOT NULL,
-                user_id         INTEGER NOT NULL,
-                group_id        INTEGER,
-                raw_message     TEXT    NOT NULL DEFAULT '',
-                sender_nickname TEXT    NOT NULL DEFAULT '',
-                raw_json        TEXT    NOT NULL,
-                created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
-             );
-
-             CREATE INDEX IF NOT EXISTS idx_messages_time ON messages(time);
-             CREATE INDEX IF NOT EXISTS idx_messages_self_id ON messages(self_id);
-             CREATE INDEX IF NOT EXISTS idx_messages_group_id ON messages(group_id);
-             CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id);
-             CREATE INDEX IF NOT EXISTS idx_messages_message_id ON messages(message_id);",
-        )
-        .map_err(|e| GatewayError::Storage(format!("table creation failed: {e}")))?;
+        conn.execute_batch(SCHEMA_SQL)
+            .map_err(|e| GatewayError::Storage(format!("table creation failed: {e}")))?;
 
         info!(path = %path, "message store opened");
 
@@ -136,28 +139,8 @@ impl MessageStore {
         let conn = Connection::open_in_memory()
             .map_err(|e| GatewayError::Storage(format!("cannot open in-memory db: {e}")))?;
 
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS messages (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                time            TEXT    NOT NULL,
-                self_id         INTEGER NOT NULL,
-                message_type    TEXT    NOT NULL,
-                message_id      INTEGER NOT NULL,
-                user_id         INTEGER NOT NULL,
-                group_id        INTEGER,
-                raw_message     TEXT    NOT NULL DEFAULT '',
-                sender_nickname TEXT    NOT NULL DEFAULT '',
-                raw_json        TEXT    NOT NULL,
-                created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
-             );
-
-             CREATE INDEX IF NOT EXISTS idx_messages_time ON messages(time);
-             CREATE INDEX IF NOT EXISTS idx_messages_self_id ON messages(self_id);
-             CREATE INDEX IF NOT EXISTS idx_messages_group_id ON messages(group_id);
-             CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id);
-             CREATE INDEX IF NOT EXISTS idx_messages_message_id ON messages(message_id);",
-        )
-        .map_err(|e| GatewayError::Storage(format!("table creation failed: {e}")))?;
+        conn.execute_batch(SCHEMA_SQL)
+            .map_err(|e| GatewayError::Storage(format!("table creation failed: {e}")))?;
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -278,7 +261,9 @@ impl MessageStore {
                 .query_map(params_refs2.as_slice(), |row| {
                     let time_str: String = row.get(1)?;
                     let time = NaiveDateTime::parse_from_str(&time_str, "%Y-%m-%dT%H:%M:%S%.f%:z")
-                        .or_else(|_| NaiveDateTime::parse_from_str(&time_str, "%Y-%m-%dT%H:%M:%S%z"))
+                        .or_else(|_| {
+                            NaiveDateTime::parse_from_str(&time_str, "%Y-%m-%dT%H:%M:%S%z")
+                        })
                         .map(|naive| naive.and_utc())
                         .unwrap_or_else(|_| Utc::now());
                     Ok(StoredMessage {

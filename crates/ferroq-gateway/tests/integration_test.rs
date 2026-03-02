@@ -45,7 +45,10 @@ async fn adapter_receives_events_from_mock_backend() {
     );
 
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<Event>();
-    adapter.connect(event_tx).await.expect("connect should succeed");
+    adapter
+        .connect(event_tx)
+        .await
+        .expect("connect should succeed");
 
     // The mock backend sends a heartbeat event every 200ms.
     let event = timeout(Duration::from_secs(3), event_rx.recv())
@@ -84,7 +87,10 @@ async fn adapter_call_api_roundtrip() {
     );
 
     let (event_tx, _event_rx) = mpsc::unbounded_channel::<Event>();
-    adapter.connect(event_tx).await.expect("connect should succeed");
+    adapter
+        .connect(event_tx)
+        .await
+        .expect("connect should succeed");
 
     // Give connection a moment to stabilize.
     tokio::time::sleep(Duration::from_millis(100)).await;

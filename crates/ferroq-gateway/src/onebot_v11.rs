@@ -15,10 +15,7 @@ pub fn parse_event(raw: serde_json::Value) -> Result<Event, GatewayError> {
         .and_then(|v| v.as_str())
         .ok_or_else(|| GatewayError::Internal("missing post_type".to_string()))?;
 
-    let self_id = raw
-        .get("self_id")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0);
+    let self_id = raw.get("self_id").and_then(|v| v.as_i64()).unwrap_or(0);
 
     let time = parse_time(&raw);
 
@@ -63,15 +60,9 @@ fn parse_message_event(
         .unwrap_or("")
         .to_string();
 
-    let message_id = raw
-        .get("message_id")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0);
+    let message_id = raw.get("message_id").and_then(|v| v.as_i64()).unwrap_or(0);
 
-    let user_id = raw
-        .get("user_id")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0);
+    let user_id = raw.get("user_id").and_then(|v| v.as_i64()).unwrap_or(0);
 
     let group_id = raw.get("group_id").and_then(|v| v.as_i64());
 
@@ -120,7 +111,10 @@ fn parse_message_segments(raw: &serde_json::Value) -> Vec<MessageSegment> {
     arr.iter()
         .filter_map(|seg| {
             let seg_type = seg.get("type")?.as_str()?;
-            let data = seg.get("data").cloned().unwrap_or(serde_json::Value::Object(Default::default()));
+            let data = seg
+                .get("data")
+                .cloned()
+                .unwrap_or(serde_json::Value::Object(Default::default()));
             parse_single_segment(seg_type, &data)
         })
         .collect()
@@ -231,19 +225,22 @@ fn parse_sender(raw: &serde_json::Value) -> Sender {
         .unwrap_or(serde_json::Value::Object(Default::default()));
 
     Sender {
-        user_id: sender
-            .get("user_id")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0),
+        user_id: sender.get("user_id").and_then(|v| v.as_i64()).unwrap_or(0),
         nickname: sender
             .get("nickname")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string(),
-        card: sender.get("card").and_then(|v| v.as_str()).map(String::from),
+        card: sender
+            .get("card")
+            .and_then(|v| v.as_str())
+            .map(String::from),
         sex: sender.get("sex").and_then(|v| v.as_str()).map(String::from),
         age: sender.get("age").and_then(|v| v.as_i64()).map(|v| v as i32),
-        area: sender.get("area").and_then(|v| v.as_str()).map(String::from),
+        area: sender
+            .get("area")
+            .and_then(|v| v.as_str())
+            .map(String::from),
         level: sender
             .get("level")
             .and_then(|v| v.as_str())
@@ -521,7 +518,9 @@ mod tests {
             assert_eq!(msg.message.len(), 3);
             assert!(matches!(&msg.message[0], MessageSegment::At { qq } if qq == "123"));
             assert!(matches!(&msg.message[1], MessageSegment::Text { text } if text == " hello"));
-            assert!(matches!(&msg.message[2], MessageSegment::Image { file, url } if file == "abc.jpg" && url.is_some()));
+            assert!(
+                matches!(&msg.message[2], MessageSegment::Image { file, url } if file == "abc.jpg" && url.is_some())
+            );
         } else {
             panic!("expected Message event");
         }

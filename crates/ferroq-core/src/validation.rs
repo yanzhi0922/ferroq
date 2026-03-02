@@ -130,11 +130,10 @@ fn validate_backend(backend: &BackendConfig, path: &str, issues: &mut Vec<Valida
     } else {
         // Check URL scheme.
         let url_lower = backend.url.to_lowercase();
-        let valid_schemes =
-            url_lower.starts_with("ws://")
-                || url_lower.starts_with("wss://")
-                || url_lower.starts_with("http://")
-                || url_lower.starts_with("https://");
+        let valid_schemes = url_lower.starts_with("ws://")
+            || url_lower.starts_with("wss://")
+            || url_lower.starts_with("http://")
+            || url_lower.starts_with("https://");
         if !valid_schemes {
             issues.push(ValidationIssue {
                 severity: Severity::Error,
@@ -157,8 +156,16 @@ fn validate_backend(backend: &BackendConfig, path: &str, issues: &mut Vec<Valida
 }
 
 fn validate_protocols(config: &AppConfig, issues: &mut Vec<ValidationIssue>) {
-    let has_any_protocol = config.protocols.onebot_v11.as_ref().is_some_and(|c| c.enabled)
-        || config.protocols.onebot_v12.as_ref().is_some_and(|c| c.enabled)
+    let has_any_protocol = config
+        .protocols
+        .onebot_v11
+        .as_ref()
+        .is_some_and(|c| c.enabled)
+        || config
+            .protocols
+            .onebot_v12
+            .as_ref()
+            .is_some_and(|c| c.enabled)
         || config.protocols.milky.as_ref().is_some_and(|c| c.enabled)
         || config.protocols.satori.as_ref().is_some_and(|c| c.enabled);
 
@@ -182,7 +189,9 @@ fn validate_onebot_v11(config: &OneBotV11Config, issues: &mut Vec<ValidationIssu
         issues.push(ValidationIssue {
             severity: Severity::Warning,
             path: "protocols.onebot_v11".into(),
-            message: "OneBot v11 is enabled but no transport (http/ws/ws_reverse/http_post) is active".into(),
+            message:
+                "OneBot v11 is enabled but no transport (http/ws/ws_reverse/http_post) is active"
+                    .into(),
         });
     }
 
@@ -242,7 +251,11 @@ protocols:
         let mut config = minimal_valid_config();
         config.accounts.clear();
         let issues = validate(&config);
-        assert!(issues.iter().any(|i| i.path == "accounts" && i.severity == Severity::Warning));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.path == "accounts" && i.severity == Severity::Warning)
+        );
     }
 
     #[test]
@@ -278,7 +291,11 @@ protocols:
         let mut config = minimal_valid_config();
         config.protocols = ProtocolsConfig::default();
         let issues = validate(&config);
-        assert!(issues.iter().any(|i| i.path == "protocols" && i.severity == Severity::Warning));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.path == "protocols" && i.severity == Severity::Warning)
+        );
     }
 
     #[test]
@@ -286,6 +303,10 @@ protocols:
         let mut config = minimal_valid_config();
         config.accounts[0].backend.reconnect_interval = 0;
         let issues = validate(&config);
-        assert!(issues.iter().any(|i| i.message.contains("reconnect_interval")));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.message.contains("reconnect_interval"))
+        );
     }
 }

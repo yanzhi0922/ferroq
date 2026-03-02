@@ -5,7 +5,6 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 use std::time::Instant;
 
 use ferroq_core::adapter::AdapterState;
@@ -188,11 +187,6 @@ impl Default for RuntimeStats {
     }
 }
 
-/// Create a shared `RuntimeStats` wrapped in `Arc`.
-pub fn new_shared_stats() -> Arc<RuntimeStats> {
-    Arc::new(RuntimeStats::new())
-}
-
 impl RuntimeStats {
     /// Render all metrics in Prometheus text exposition format.
     pub fn prometheus_metrics(&self) -> String {
@@ -208,37 +202,67 @@ impl RuntimeStats {
         out.push_str("# TYPE ferroq_events_total counter\n");
         out.push_str(&format!("ferroq_events_total {}\n\n", health.events_total));
 
-        out.push_str("# HELP ferroq_events_deduplicated_total Total duplicate events suppressed.\n");
+        out.push_str(
+            "# HELP ferroq_events_deduplicated_total Total duplicate events suppressed.\n",
+        );
         out.push_str("# TYPE ferroq_events_deduplicated_total counter\n");
-        out.push_str(&format!("ferroq_events_deduplicated_total {}\n\n", health.events_deduplicated));
+        out.push_str(&format!(
+            "ferroq_events_deduplicated_total {}\n\n",
+            health.events_deduplicated
+        ));
 
         out.push_str("# HELP ferroq_api_calls_total Total API calls routed.\n");
         out.push_str("# TYPE ferroq_api_calls_total counter\n");
-        out.push_str(&format!("ferroq_api_calls_total {}\n\n", health.api_calls_total));
+        out.push_str(&format!(
+            "ferroq_api_calls_total {}\n\n",
+            health.api_calls_total
+        ));
 
         out.push_str("# HELP ferroq_ws_connections_active Active WebSocket connections.\n");
         out.push_str("# TYPE ferroq_ws_connections_active gauge\n");
-        out.push_str(&format!("ferroq_ws_connections_active {}\n\n", health.ws_connections));
+        out.push_str(&format!(
+            "ferroq_ws_connections_active {}\n\n",
+            health.ws_connections
+        ));
 
-        out.push_str("# HELP ferroq_ws_connections_total Total WebSocket connections served (lifetime).\n");
+        out.push_str(
+            "# HELP ferroq_ws_connections_total Total WebSocket connections served (lifetime).\n",
+        );
         out.push_str("# TYPE ferroq_ws_connections_total counter\n");
-        out.push_str(&format!("ferroq_ws_connections_total {}\n\n", health.ws_connections_total));
+        out.push_str(&format!(
+            "ferroq_ws_connections_total {}\n\n",
+            health.ws_connections_total
+        ));
 
         out.push_str("# HELP ferroq_messages_stored_total Total messages persisted to storage.\n");
         out.push_str("# TYPE ferroq_messages_stored_total counter\n");
-        out.push_str(&format!("ferroq_messages_stored_total {}\n\n", health.messages_stored));
+        out.push_str(&format!(
+            "ferroq_messages_stored_total {}\n\n",
+            health.messages_stored
+        ));
 
-        out.push_str("# HELP ferroq_storage_enabled Whether message storage is enabled (1=yes, 0=no).\n");
+        out.push_str(
+            "# HELP ferroq_storage_enabled Whether message storage is enabled (1=yes, 0=no).\n",
+        );
         out.push_str("# TYPE ferroq_storage_enabled gauge\n");
-        out.push_str(&format!("ferroq_storage_enabled {}\n\n", if health.storage_enabled { 1 } else { 0 }));
+        out.push_str(&format!(
+            "ferroq_storage_enabled {}\n\n",
+            if health.storage_enabled { 1 } else { 0 }
+        ));
 
         out.push_str("# HELP ferroq_adapters_total Total number of backend adapters.\n");
         out.push_str("# TYPE ferroq_adapters_total gauge\n");
-        out.push_str(&format!("ferroq_adapters_total {}\n\n", health.total_adapters));
+        out.push_str(&format!(
+            "ferroq_adapters_total {}\n\n",
+            health.total_adapters
+        ));
 
         out.push_str("# HELP ferroq_adapters_healthy Number of healthy backend adapters.\n");
         out.push_str("# TYPE ferroq_adapters_healthy gauge\n");
-        out.push_str(&format!("ferroq_adapters_healthy {}\n\n", health.healthy_adapters));
+        out.push_str(&format!(
+            "ferroq_adapters_healthy {}\n\n",
+            health.healthy_adapters
+        ));
 
         // -- Per-adapter metrics --
         if !health.adapters.is_empty() {
@@ -247,7 +271,10 @@ impl RuntimeStats {
             for a in &health.adapters {
                 out.push_str(&format!(
                     "ferroq_adapter_healthy{{name=\"{}\",type=\"{}\",state=\"{}\"}} {}\n",
-                    a.name, a.backend_type, a.state, if a.healthy { 1 } else { 0 }
+                    a.name,
+                    a.backend_type,
+                    a.state,
+                    if a.healthy { 1 } else { 0 }
                 ));
             }
             out.push('\n');

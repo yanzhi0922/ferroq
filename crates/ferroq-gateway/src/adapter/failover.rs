@@ -59,21 +59,23 @@ impl BackendAdapter for FailoverAdapter {
         let fallback_info = self.fallback.info();
 
         // State: Connected if either side is connected, else primary's state.
-        let state =
-            if primary_info.state == AdapterState::Connected
-                || fallback_info.state == AdapterState::Connected
-            {
-                AdapterState::Connected
-            } else {
-                primary_info.state
-            };
+        let state = if primary_info.state == AdapterState::Connected
+            || fallback_info.state == AdapterState::Connected
+        {
+            AdapterState::Connected
+        } else {
+            primary_info.state
+        };
 
         // self_id: prefer primary, fall back to fallback.
         let self_id = primary_info.self_id.or(fallback_info.self_id);
 
         AdapterInfo {
             name: self.name.clone(),
-            backend_type: format!("{}+{}", primary_info.backend_type, fallback_info.backend_type),
+            backend_type: format!(
+                "{}+{}",
+                primary_info.backend_type, fallback_info.backend_type
+            ),
             url: primary_info.url,
             state,
             self_id,
@@ -82,10 +84,7 @@ impl BackendAdapter for FailoverAdapter {
 
     async fn connect(&self, event_tx: mpsc::UnboundedSender<Event>) -> Result<(), GatewayError> {
         // Connect primary with a clone of the event channel.
-        let primary_result = self
-            .primary
-            .connect(event_tx.clone())
-            .await;
+        let primary_result = self.primary.connect(event_tx.clone()).await;
 
         match &primary_result {
             Ok(()) => {
@@ -106,10 +105,7 @@ impl BackendAdapter for FailoverAdapter {
         }
 
         // Connect fallback independently — it's a standby that also pushes events.
-        let fallback_result = self
-            .fallback
-            .connect(event_tx)
-            .await;
+        let fallback_result = self.fallback.connect(event_tx).await;
 
         match &fallback_result {
             Ok(()) => {
@@ -265,7 +261,11 @@ mod tests {
         primary.set_connected();
         fallback.set_connected();
 
-        let adapter = FailoverAdapter::new("main", primary.clone() as Arc<dyn BackendAdapter>, fallback as Arc<dyn BackendAdapter>);
+        let adapter = FailoverAdapter::new(
+            "main",
+            primary.clone() as Arc<dyn BackendAdapter>,
+            fallback as Arc<dyn BackendAdapter>,
+        );
 
         let resp = adapter
             .call_api(ApiRequest {
@@ -288,7 +288,11 @@ mod tests {
         fallback.set_connected();
         primary.set_api_error("connection lost");
 
-        let adapter = FailoverAdapter::new("main", primary as Arc<dyn BackendAdapter>, fallback as Arc<dyn BackendAdapter>);
+        let adapter = FailoverAdapter::new(
+            "main",
+            primary as Arc<dyn BackendAdapter>,
+            fallback as Arc<dyn BackendAdapter>,
+        );
 
         let resp = adapter
             .call_api(ApiRequest {
@@ -330,7 +334,11 @@ mod tests {
             echo: None,
         });
 
-        let adapter = FailoverAdapter::new("main", primary as Arc<dyn BackendAdapter>, fallback as Arc<dyn BackendAdapter>);
+        let adapter = FailoverAdapter::new(
+            "main",
+            primary as Arc<dyn BackendAdapter>,
+            fallback as Arc<dyn BackendAdapter>,
+        );
 
         let resp = adapter
             .call_api(ApiRequest {
@@ -352,7 +360,11 @@ mod tests {
         let primary = MockAdapter::new("primary", "lagrange");
         let fallback = MockAdapter::new("fallback", "napcat");
 
-        let adapter = FailoverAdapter::new("main", primary as Arc<dyn BackendAdapter>, fallback as Arc<dyn BackendAdapter>);
+        let adapter = FailoverAdapter::new(
+            "main",
+            primary as Arc<dyn BackendAdapter>,
+            fallback as Arc<dyn BackendAdapter>,
+        );
 
         let (tx, _rx) = mpsc::unbounded_channel();
         adapter.connect(tx).await.unwrap();
@@ -368,7 +380,11 @@ mod tests {
         primary.set_connected();
         fallback.set_unhealthy();
 
-        let adapter = FailoverAdapter::new("main", primary as Arc<dyn BackendAdapter>, fallback as Arc<dyn BackendAdapter>);
+        let adapter = FailoverAdapter::new(
+            "main",
+            primary as Arc<dyn BackendAdapter>,
+            fallback as Arc<dyn BackendAdapter>,
+        );
 
         assert!(adapter.health_check().await);
     }
@@ -380,7 +396,11 @@ mod tests {
         primary.set_unhealthy();
         fallback.set_connected();
 
-        let adapter = FailoverAdapter::new("main", primary as Arc<dyn BackendAdapter>, fallback as Arc<dyn BackendAdapter>);
+        let adapter = FailoverAdapter::new(
+            "main",
+            primary as Arc<dyn BackendAdapter>,
+            fallback as Arc<dyn BackendAdapter>,
+        );
 
         assert!(adapter.health_check().await);
     }
@@ -392,7 +412,11 @@ mod tests {
         primary.set_unhealthy();
         fallback.set_unhealthy();
 
-        let adapter = FailoverAdapter::new("main", primary as Arc<dyn BackendAdapter>, fallback as Arc<dyn BackendAdapter>);
+        let adapter = FailoverAdapter::new(
+            "main",
+            primary as Arc<dyn BackendAdapter>,
+            fallback as Arc<dyn BackendAdapter>,
+        );
 
         assert!(!adapter.health_check().await);
     }
@@ -402,7 +426,11 @@ mod tests {
         let primary = MockAdapter::new("primary", "lagrange");
         let fallback = MockAdapter::new("fallback", "napcat");
 
-        let adapter = FailoverAdapter::new("main", primary as Arc<dyn BackendAdapter>, fallback as Arc<dyn BackendAdapter>);
+        let adapter = FailoverAdapter::new(
+            "main",
+            primary as Arc<dyn BackendAdapter>,
+            fallback as Arc<dyn BackendAdapter>,
+        );
 
         let info = adapter.info();
         assert_eq!(info.name, "main");
@@ -416,7 +444,11 @@ mod tests {
         primary.set_connected();
         fallback.set_connected();
 
-        let adapter = FailoverAdapter::new("main", primary.clone() as Arc<dyn BackendAdapter>, fallback.clone() as Arc<dyn BackendAdapter>);
+        let adapter = FailoverAdapter::new(
+            "main",
+            primary.clone() as Arc<dyn BackendAdapter>,
+            fallback.clone() as Arc<dyn BackendAdapter>,
+        );
         adapter.disconnect().await.unwrap();
 
         assert_eq!(primary.info().state, AdapterState::Disconnected);

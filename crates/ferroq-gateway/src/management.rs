@@ -6,10 +6,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use axum::Json;
 use axum::extract::{Query, State};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
-use axum::Json;
 use serde::Serialize;
 use tracing::{info, warn};
 
@@ -50,7 +50,15 @@ pub fn management_routes(
     shared_config: Arc<SharedConfig>,
     rate_limiter: Option<RateLimiter>,
 ) -> axum::Router {
-    management_routes_with_manager(router, stats, store, config_path, shared_config, rate_limiter, None)
+    management_routes_with_manager(
+        router,
+        stats,
+        store,
+        config_path,
+        shared_config,
+        rate_limiter,
+        None,
+    )
 }
 
 /// Build the management API router with an optional adapter manager.
@@ -98,9 +106,7 @@ struct AccountEntry {
     self_id: Option<i64>,
 }
 
-async fn handle_list_accounts(
-    State(state): State<Arc<ManagementState>>,
-) -> impl IntoResponse {
+async fn handle_list_accounts(State(state): State<Arc<ManagementState>>) -> impl IntoResponse {
     let adapters = state.stats.health().adapters;
     let accounts: Vec<AccountEntry> = adapters
         .into_iter()
@@ -158,9 +164,7 @@ async fn handle_query_messages(
 // GET /api/stats
 // ---------------------------------------------------------------------------
 
-async fn handle_stats(
-    State(state): State<Arc<ManagementState>>,
-) -> impl IntoResponse {
+async fn handle_stats(State(state): State<Arc<ManagementState>>) -> impl IntoResponse {
     Json(state.stats.health())
 }
 
@@ -168,9 +172,7 @@ async fn handle_stats(
 // POST /api/reload
 // ---------------------------------------------------------------------------
 
-async fn handle_reload(
-    State(state): State<Arc<ManagementState>>,
-) -> impl IntoResponse {
+async fn handle_reload(State(state): State<Arc<ManagementState>>) -> impl IntoResponse {
     let Some(ref config_path) = state.config_path else {
         return Json(serde_json::json!({
             "status": "failed",
@@ -229,7 +231,9 @@ async fn handle_reload(
     // Access token.
     let current_token = state.shared_config.access_token();
     if config.server.access_token != current_token {
-        state.shared_config.set_access_token(config.server.access_token.clone());
+        state
+            .shared_config
+            .set_access_token(config.server.access_token.clone());
         changes.push("access_token updated".into());
         info!("config reload: access_token updated");
     }
@@ -242,8 +246,7 @@ async fn handle_reload(
         );
         changes.push(format!(
             "rate_limit updated: rps={}, burst={}",
-            config.server.rate_limit.requests_per_second,
-            config.server.rate_limit.burst,
+            config.server.rate_limit.requests_per_second, config.server.rate_limit.burst,
         ));
         info!(
             rps = config.server.rate_limit.requests_per_second,
@@ -263,7 +266,7 @@ async fn handle_reload(
         "message": "configuration reloaded",
         "changes": changes,
         "warnings": warnings,
-        "note": "adapter and protocol changes require restart",
+        "note": "use the adapter management API (/api/accounts) to add, remove, or reconnect adapters at runtime",
     }))
 }
 
@@ -272,9 +275,7 @@ async fn handle_reload(
 // ---------------------------------------------------------------------------
 
 /// Returns the current configuration with secrets redacted.
-async fn handle_config(
-    State(state): State<Arc<ManagementState>>,
-) -> impl IntoResponse {
+async fn handle_config(State(state): State<Arc<ManagementState>>) -> impl IntoResponse {
     let Some(ref config_path) = state.config_path else {
         return Json(serde_json::json!({
             "status": "failed",
@@ -465,7 +466,9 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "ok");
         assert!(json["data"].as_array().unwrap().is_empty());
@@ -496,7 +499,9 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let accounts = json["data"].as_array().unwrap();
         assert_eq!(accounts.len(), 1);
@@ -520,7 +525,9 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "ok");
         assert_eq!(json["events_total"], 1);
@@ -537,7 +544,9 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "failed");
         assert!(json["message"].as_str().unwrap().contains("not enabled"));
@@ -554,7 +563,9 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "failed");
         assert!(json["message"].as_str().unwrap().contains("config path"));
@@ -570,7 +581,9 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "failed");
         assert!(json["message"].as_str().unwrap().contains("config path"));
@@ -622,7 +635,9 @@ logging:
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "ok");
 
@@ -682,7 +697,9 @@ logging:
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "ok");
 
@@ -709,12 +726,16 @@ logging:
             .method("POST")
             .uri("/accounts/add")
             .header("content-type", "application/json")
-            .body(Body::from(r#"{"name":"bot","backend":{"type":"lagrange","url":"ws://localhost:1234"}}"#))
+            .body(Body::from(
+                r#"{"name":"bot","backend":{"type":"lagrange","url":"ws://localhost:1234"}}"#,
+            ))
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "failed");
         assert!(json["message"].as_str().unwrap().contains("not available"));
@@ -731,7 +752,9 @@ logging:
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "failed");
         assert!(json["message"].as_str().unwrap().contains("not available"));
@@ -748,7 +771,9 @@ logging:
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "failed");
         assert!(json["message"].as_str().unwrap().contains("not available"));
@@ -789,7 +814,9 @@ logging:
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "failed");
         assert!(json["message"].as_str().unwrap().contains("not found"));
@@ -806,7 +833,9 @@ logging:
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "failed");
         assert!(json["message"].as_str().unwrap().contains("not found"));
@@ -826,9 +855,16 @@ logging:
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "failed");
-        assert!(json["message"].as_str().unwrap().contains("unknown backend type"));
+        assert!(
+            json["message"]
+                .as_str()
+                .unwrap()
+                .contains("unknown backend type")
+        );
     }
 }

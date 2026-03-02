@@ -11,7 +11,11 @@ use crate::error::GatewayError;
 use crate::event::Event;
 
 /// A callback used by protocol servers to route API requests to the backend.
-pub type ApiRouter = Box<dyn Fn(ApiRequest) -> futures::future::BoxFuture<'static, Result<ApiResponse, GatewayError>> + Send + Sync>;
+pub type ApiRouter = Box<
+    dyn Fn(ApiRequest) -> futures::future::BoxFuture<'static, Result<ApiResponse, GatewayError>>
+        + Send
+        + Sync,
+>;
 
 /// Trait for inbound protocol servers.
 ///
