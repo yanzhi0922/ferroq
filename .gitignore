@@ -26,3 +26,11 @@ config.yaml
 # mdbook build output
 docs/book/
 docs/book-zh/
+
+# Internal planning documents (not for public)
+PLAN.md
+PLAN_PATH_A.md
+PLAN_PATH_B.md
+GROWTH_PLAN.md
+COMPETITOR_SNAPSHOT.md
+COMPARE_BENCHMARK.md
