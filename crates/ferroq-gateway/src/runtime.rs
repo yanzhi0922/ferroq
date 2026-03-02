@@ -147,7 +147,7 @@ impl GatewayRuntime {
             self.forward_handles.push(handle);
         }
 
-        // Spawn periodic stats refresher (update adapter snapshots every 5s).
+        // Spawn periodic stats refresher + health checker (every 5s).
         let adapters_for_stats: Vec<Arc<dyn BackendAdapter>> =
             self.adapters.iter().map(Arc::clone).collect();
         let stats_clone = Arc::clone(&self.stats);
@@ -155,24 +155,32 @@ impl GatewayRuntime {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
             loop {
                 interval.tick().await;
-                let snapshots: Vec<AdapterSnapshot> = adapters_for_stats
-                    .iter()
-                    .map(|a| {
-                        let info = a.info();
-                        AdapterSnapshot {
-                            name: info.name,
-                            backend_type: info.backend_type,
-                            url: info.url,
-                            state: info.state,
-                            self_id: info.self_id,
-                        }
-                    })
-                    .collect();
+                let mut snapshots = Vec::with_capacity(adapters_for_stats.len());
+                for a in &adapters_for_stats {
+                    let info = a.info();
+                    let start = std::time::Instant::now();
+                    let healthy = a.health_check().await;
+                    let latency = start.elapsed().as_millis() as u64;
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    snapshots.push(AdapterSnapshot {
+                        name: info.name,
+                        backend_type: info.backend_type,
+                        url: info.url,
+                        state: info.state,
+                        self_id: info.self_id,
+                        healthy,
+                        health_check_ms: Some(latency),
+                        last_health_check: Some(now),
+                    });
+                }
                 stats_clone.update_adapters(snapshots);
             }
         }));
 
-        // Do an initial snapshot immediately.
+        // Do an initial snapshot immediately (health checks run in the periodic task).
         let snapshots: Vec<AdapterSnapshot> = self
             .adapters
             .iter()
@@ -184,6 +192,9 @@ impl GatewayRuntime {
                     url: info.url,
                     state: info.state,
                     self_id: info.self_id,
+                    healthy: info.state == ferroq_core::adapter::AdapterState::Connected,
+                    health_check_ms: None,
+                    last_health_check: None,
                 }
             })
             .collect();

@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use tracing::info;
+use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
 
 /// ferroq — High-performance QQ Bot unified gateway
@@ -40,22 +41,14 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // Init tracing
+    // Init tracing — basic console output first, may be upgraded after config load.
+    let log_level_override = cli.log_level.clone();
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        let level = cli.log_level.as_deref().unwrap_or("info");
+        let level = log_level_override.as_deref().unwrap_or("info");
         EnvFilter::new(format!("ferroq={level},ferroq_core={level},ferroq_gateway={level},ferroq_web={level}"))
     });
 
-    tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
-        .with_target(true)
-        .with_thread_ids(false)
-        .with_file(false)
-        .init();
-
-    info!(version = env!("CARGO_PKG_VERSION"), "starting ferroq");
-
-    // Load config
+    // Load config first (before full tracing init) to check logging.file.
     let config_path = &cli.config;
     if !config_path.exists() {
         anyhow::bail!(
@@ -66,6 +59,53 @@ async fn main() -> anyhow::Result<()> {
 
     let config_str = std::fs::read_to_string(config_path)?;
     let config: ferroq_core::config::AppConfig = serde_yaml::from_str(&config_str)?;
+
+    // Initialize tracing with console + optional file output.
+    // Must happen after config parse so we can read logging.file.
+    let _file_guard = if let Some(ref log_file) = config.logging.file {
+        // Use daily-rotating file appender.
+        let file_path = std::path::Path::new(log_file);
+        let dir = file_path.parent().unwrap_or(std::path::Path::new("."));
+        let filename = file_path
+            .file_name()
+            .map(|f| f.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "ferroq.log".into());
+
+        let file_appender = tracing_appender::rolling::daily(dir, filename);
+        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+
+        let console_layer = tracing_subscriber::fmt::layer()
+            .with_target(true)
+            .with_thread_ids(false)
+            .with_file(false);
+
+        let file_layer = tracing_subscriber::fmt::layer()
+            .with_ansi(false)
+            .with_target(true)
+            .with_writer(non_blocking);
+
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(console_layer)
+            .with(file_layer)
+            .init();
+
+        Some(guard)
+    } else {
+        // Console only.
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .with_target(true)
+            .with_thread_ids(false)
+            .with_file(false)
+            .init();
+        None
+    };
+
+    info!(version = env!("CARGO_PKG_VERSION"), "starting ferroq");
+    if let Some(ref log_file) = config.logging.file {
+        info!(file = %log_file, "file logging enabled");
+    }
 
     // Validate config before proceeding.
     let issues = ferroq_core::validation::validate(&config);
@@ -135,6 +175,7 @@ async fn main() -> anyhow::Result<()> {
             runtime.router().clone(),
             runtime.stats().clone(),
             runtime.store().clone(),
+            Some(config_path.clone()),
         ),
         config.server.access_token.clone(),
     );

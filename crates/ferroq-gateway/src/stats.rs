@@ -36,6 +36,12 @@ pub struct AdapterSnapshot {
     pub url: String,
     pub state: AdapterState,
     pub self_id: Option<i64>,
+    /// Whether the last health check succeeded.
+    pub healthy: bool,
+    /// Latency of the last health check in milliseconds.
+    pub health_check_ms: Option<u64>,
+    /// Unix timestamp of the last health check.
+    pub last_health_check: Option<u64>,
 }
 
 /// Full health check response body.
@@ -49,6 +55,8 @@ pub struct HealthResponse {
     pub ws_connections: u64,
     pub messages_stored: u64,
     pub storage_enabled: bool,
+    pub healthy_adapters: usize,
+    pub total_adapters: usize,
     pub adapters: Vec<AdapterSnapshot>,
 }
 
@@ -102,6 +110,9 @@ impl RuntimeStats {
 
     /// Build a full health response.
     pub fn health(&self) -> HealthResponse {
+        let adapters = self.adapters.read().clone();
+        let healthy_adapters = adapters.iter().filter(|a| a.healthy).count();
+        let total_adapters = adapters.len();
         HealthResponse {
             status: "ok",
             version: env!("CARGO_PKG_VERSION"),
@@ -111,7 +122,9 @@ impl RuntimeStats {
             ws_connections: self.ws_connections.load(Ordering::Relaxed),
             messages_stored: self.messages_stored.load(Ordering::Relaxed),
             storage_enabled: self.storage_enabled,
-            adapters: self.adapters.read().clone(),
+            healthy_adapters,
+            total_adapters,
+            adapters,
         }
     }
 }
