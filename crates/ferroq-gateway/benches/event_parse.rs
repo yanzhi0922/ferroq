@@ -2,7 +2,7 @@
 
 mod helpers;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use ferroq_gateway::onebot_v11;
 
 /// Benchmark: parse a small OneBot v11 message event JSON → internal Event.

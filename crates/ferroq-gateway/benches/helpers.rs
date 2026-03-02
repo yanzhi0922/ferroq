@@ -42,10 +42,7 @@ pub fn make_1kb_message_event(self_id: i64, message_id: i64) -> Event {
     // Each text segment is about 100 bytes of JSON. 10 segments ≈ 1KB.
     let segments: Vec<MessageSegment> = (0..10)
         .map(|i| MessageSegment::Text {
-            text: format!(
-                "benchmark payload segment {i}: {}",
-                "x".repeat(80)
-            ),
+            text: format!("benchmark payload segment {i}: {}", "x".repeat(80)),
         })
         .collect();
     let raw = segments

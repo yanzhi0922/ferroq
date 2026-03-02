@@ -8,7 +8,11 @@ pub fn dashboard_routes() -> axum::Router {
     use axum::response::Html;
     use axum::routing::get;
 
-    axum::Router::new().route("/", get(|| async { Html(DASHBOARD_HTML) }))
+    async fn dashboard_html() -> Html<&'static str> {
+        Html(DASHBOARD_HTML)
+    }
+
+    axum::Router::new().fallback(get(dashboard_html))
 }
 
 /// Embedded dashboard HTML — a self-contained SPA that fetches `/health`
@@ -111,6 +115,14 @@ const DASHBOARD_HTML: &str = r##"<!DOCTYPE html>
       <div class="label">Storage</div>
       <div class="value" id="storage-status" style="font-size:1.2em">-</div>
     </div>
+    <div class="stat-card">
+      <div class="label">WS Events Dropped</div>
+      <div class="value" id="ws-dropped">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">WS API Rejected</div>
+      <div class="value" id="ws-rejected">0</div>
+    </div>
   </div>
 
   <div style="display: flex; align-items: center; margin-bottom: 12px;">
@@ -162,6 +174,8 @@ async function refresh() {
     document.getElementById('api-calls').textContent = formatNumber(data.api_calls_total);
     document.getElementById('ws-conns').textContent = data.ws_connections + ' / ' + formatNumber(data.ws_connections_total);
     document.getElementById('msgs-stored').textContent = formatNumber(data.messages_stored);
+    document.getElementById('ws-dropped').textContent = formatNumber(data.ws_events_dropped || 0);
+    document.getElementById('ws-rejected').textContent = formatNumber(data.ws_api_rejected || 0);
     document.getElementById('storage-status').textContent = data.storage_enabled ? 'Enabled' : 'Disabled';
     document.getElementById('storage-status').style.color = data.storage_enabled ? 'var(--green)' : 'var(--text-dim)';
 
@@ -206,3 +220,13 @@ setInterval(refresh, 2000);
 </script>
 </body>
 </html>"##;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dashboard_routes_builds_without_panic() {
+        let _ = dashboard_routes();
+    }
+}

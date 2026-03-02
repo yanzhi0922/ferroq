@@ -269,7 +269,7 @@ async fn handle_ws_upgrade(
 
 /// Handle an active forward WebSocket connection.
 async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
-    let (ws_tx, mut ws_rx) = socket.split();
+    let (mut ws_tx, mut ws_rx) = socket.split();
     let mut event_rx = state.bus_tx.subscribe();
     let router = Arc::clone(&state.router);
     let stats = Arc::clone(&state.stats);
@@ -278,15 +278,16 @@ async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
     info!("new OneBot v11 forward WS client connected");
 
     // Shared writer channel — both event push and API responses write through this.
-    let (msg_tx, mut msg_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let (msg_tx, mut msg_rx) =
+        tokio::sync::mpsc::channel::<String>(crate::tuning::ws_outbound_queue_capacity());
+    let api_semaphore = Arc::new(tokio::sync::Semaphore::new(
+        crate::tuning::ws_api_max_in_flight(),
+    ));
 
     // Task: drain msg_rx and write to WS.
-    let ws_tx = Arc::new(tokio::sync::Mutex::new(ws_tx));
-    let ws_tx_clone = Arc::clone(&ws_tx);
     let writer_task = tokio::spawn(async move {
         while let Some(text) = msg_rx.recv().await {
-            let mut tx = ws_tx_clone.lock().await;
-            if tx.send(AxumWsMessage::Text(text.into())).await.is_err() {
+            if ws_tx.send(AxumWsMessage::Text(text.into())).await.is_err() {
                 break;
             }
         }
@@ -294,14 +295,20 @@ async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
 
     // Task: push events to the WS client.
     let msg_tx_events = msg_tx.clone();
+    let stats_push = Arc::clone(&stats);
     let push_task = tokio::spawn(async move {
         loop {
             match event_rx.recv().await {
                 Ok(event) => {
                     let json = parser::event_to_json(&event);
                     let text = serde_json::to_string(&json).unwrap_or_default();
-                    if msg_tx_events.send(text).is_err() {
-                        break;
+                    match msg_tx_events.try_send(text) {
+                        Ok(()) => {}
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                            stats_push.record_ws_event_dropped();
+                            debug!("forward WS outbound queue full, dropping event");
+                        }
+                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
@@ -328,9 +335,25 @@ async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
                 let msg_tx_resp = msg_tx.clone();
                 let router_clone = Arc::clone(&router);
                 let stats_clone = Arc::clone(&stats);
+                let permit = match api_semaphore.clone().try_acquire_owned() {
+                    Ok(p) => p,
+                    Err(_) => {
+                        let resp = ApiResponse::fail(
+                            1400,
+                            "too many in-flight WS API requests".to_string(),
+                        )
+                        .with_echo(echo);
+                        let text = serde_json::to_string(&resp).unwrap_or_default();
+                        let _ = msg_tx.send(text).await;
+                        stats.record_ws_api_rejected();
+                        warn!("forward WS API overload, request rejected");
+                        continue;
+                    }
+                };
 
                 // Process API call and send response back on the same WS.
                 tokio::spawn(async move {
+                    let _permit = permit;
                     let resp = match router_clone.route_named(request).await {
                         Ok((mut r, adapter_name)) => {
                             stats_clone.record_api_call_for(&adapter_name);
@@ -340,7 +363,7 @@ async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
                         Err(e) => ApiResponse::fail(1400, e.to_string()).with_echo(echo),
                     };
                     let text = serde_json::to_string(&resp).unwrap_or_default();
-                    let _ = msg_tx_resp.send(text);
+                    let _ = msg_tx_resp.send(text).await;
                 });
             }
             AxumWsMessage::Close(_) => break,
@@ -367,6 +390,7 @@ async fn reverse_ws_task(
     stats: Arc<RuntimeStats>,
 ) {
     info!(url = %target.url, "starting reverse WS connection");
+    let target_url = target.url.clone();
 
     // Exponential backoff: 5s → 10s → 20s → … capped at 120s.
     let base_interval: u64 = 5;
@@ -388,7 +412,7 @@ async fn reverse_ws_task(
 
         match tokio_tungstenite::connect_async(request).await {
             Ok((ws_stream, _)) => {
-                info!(url = %target.url, "reverse WS connected");
+                info!(url = %target_url, "reverse WS connected");
                 // Reset backoff on successful connection.
                 current_interval = base_interval;
                 let (ws_tx, mut ws_rx) = ws_stream.split();
@@ -397,21 +421,35 @@ async fn reverse_ws_task(
                 let mut event_rx = bus_tx.subscribe();
 
                 // Shared writer channel — events and API responses both write through this.
-                let (msg_tx, msg_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+                let (msg_tx, msg_rx) = tokio::sync::mpsc::channel::<String>(
+                    crate::tuning::ws_outbound_queue_capacity(),
+                );
 
                 // Task: drain msg_rx and write to WS.
                 let writer_task = tokio::spawn(reverse_ws_writer(ws_tx, msg_rx));
 
                 // Task: push events to the remote end.
                 let msg_tx_events = msg_tx.clone();
+                let target_url_for_push = target_url.clone();
+                let stats_push = Arc::clone(&stats);
                 let push_task = tokio::spawn(async move {
                     loop {
                         match event_rx.recv().await {
                             Ok(event) => {
                                 let json = parser::event_to_json(&event);
                                 let text = serde_json::to_string(&json).unwrap_or_default();
-                                if msg_tx_events.send(text).is_err() {
-                                    break;
+                                match msg_tx_events.try_send(text) {
+                                    Ok(()) => {}
+                                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                                        stats_push.record_ws_event_dropped();
+                                        debug!(
+                                            url = %target_url_for_push,
+                                            "reverse WS outbound queue full, dropping event"
+                                        );
+                                    }
+                                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                                        break;
+                                    }
                                 }
                             }
                             Err(broadcast::error::RecvError::Lagged(n)) => {
@@ -423,6 +461,9 @@ async fn reverse_ws_task(
                 });
 
                 // Receive API requests from the remote end and send responses back.
+                let api_semaphore = Arc::new(tokio::sync::Semaphore::new(
+                    crate::tuning::ws_api_max_in_flight(),
+                ));
                 while let Some(Ok(msg)) = ws_rx.next().await {
                     if let tokio_tungstenite::tungstenite::Message::Text(text) = msg {
                         if let Ok(request) = serde_json::from_str::<ApiRequest>(&text) {
@@ -430,8 +471,24 @@ async fn reverse_ws_task(
                             let msg_tx_resp = msg_tx.clone();
                             let router_clone = Arc::clone(&router);
                             let stats_clone = Arc::clone(&stats);
+                            let permit = match api_semaphore.clone().try_acquire_owned() {
+                                Ok(p) => p,
+                                Err(_) => {
+                                    let resp = ApiResponse::fail(
+                                        1400,
+                                        "too many in-flight WS API requests".to_string(),
+                                    )
+                                    .with_echo(echo);
+                                    let text = serde_json::to_string(&resp).unwrap_or_default();
+                                    let _ = msg_tx.send(text).await;
+                                    stats.record_ws_api_rejected();
+                                    warn!(url = %target_url, "reverse WS API overload, request rejected");
+                                    continue;
+                                }
+                            };
 
                             tokio::spawn(async move {
+                                let _permit = permit;
                                 let resp = match router_clone.route_named(request).await {
                                     Ok((mut r, adapter_name)) => {
                                         stats_clone.record_api_call_for(&adapter_name);
@@ -443,7 +500,7 @@ async fn reverse_ws_task(
                                     }
                                 };
                                 let text = serde_json::to_string(&resp).unwrap_or_default();
-                                let _ = msg_tx_resp.send(text);
+                                let _ = msg_tx_resp.send(text).await;
                             });
                         }
                     }
@@ -451,10 +508,10 @@ async fn reverse_ws_task(
 
                 push_task.abort();
                 writer_task.abort();
-                warn!(url = %target.url, retry_secs = current_interval, "reverse WS disconnected, reconnecting");
+                warn!(url = %target_url, retry_secs = current_interval, "reverse WS disconnected, reconnecting");
             }
             Err(e) => {
-                error!(url = %target.url, error = %e, retry_secs = current_interval, "reverse WS connect failed");
+                error!(url = %target_url, error = %e, retry_secs = current_interval, "reverse WS connect failed");
             }
         }
 
@@ -471,7 +528,7 @@ async fn reverse_ws_writer(
         >,
         tokio_tungstenite::tungstenite::Message,
     >,
-    mut msg_rx: tokio::sync::mpsc::UnboundedReceiver<String>,
+    mut msg_rx: tokio::sync::mpsc::Receiver<String>,
 ) {
     while let Some(text) = msg_rx.recv().await {
         if ws_tx

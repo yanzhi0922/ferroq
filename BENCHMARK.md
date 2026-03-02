@@ -1,6 +1,6 @@
 # Benchmark Results
 
-> ferroq v0.1.0 — High-performance QQ Bot unified gateway
+> ferroq v1.0.0-rc — High-performance QQ Bot unified gateway
 >
 > **Platform**: Windows 11, AMD/Intel x86_64, Rust 1.85 stable
 > **Profile**: `release` (LTO enabled, single codegen unit, stripped)
@@ -10,7 +10,7 @@
 
 ## Summary
 
-| Metric | Target (v0.1.0) | Measured | Status |
+| Metric | Target (v1.0.0-rc) | Measured | Status |
 |--------|-----------------|----------|--------|
 | Event bus publish (1 sub) | — | **309 ns** | ✅ |
 | Full pipeline latency (parse→dedup→bus→serialize) | < 5 ms p99 | **17.5 µs** | ✅ ~285× under budget |
@@ -21,6 +21,29 @@
 | Memory — idle (core components) | < 10 MB | **4.9 MB** | ✅ |
 | Memory — 100k events processed | < 30 MB | **10.0 MB** | ✅ |
 | Memory — 1k×1KB events buffered | — | **12.7 MB** | ✅ |
+
+---
+
+## 0. Latest Optimization Pass (2026-03-03)
+
+The table below is an A/B rerun on the same host after parser + dedup hot-path
+optimizations (criterion benches, `ferroq-gateway`).
+
+| Benchmark | Before | After | Delta |
+|-----------|--------|-------|-------|
+| `parse/onebot_v11_small` | 2.2107 µs | 1.9512 µs | **-11.7%** |
+| `parse/onebot_v11_1kb` | 8.5115 µs | 6.5880 µs | **-22.6%** |
+| `roundtrip/parse_then_serialize` | 3.4925 µs | 3.1596 µs | **-9.5%** |
+| `parse/throughput/1000_events` | 400.03 K msg/s | 452.89 K msg/s | **+13.2%** |
+| `dedup/duplicate_event` | 574.91 ns | 571.22 ns | **-0.6%** |
+| `dedup/throughput/1000_unique` | 1.4532 M msg/s | 1.5040 M msg/s | **+3.5%** |
+
+These gains come from:
+
+- removing avoidable `serde_json::Value` clones in the OneBot v11 parser
+- reducing lock contention in dedup eviction logic (atomic eviction timestamp)
+- switching WS outbound paths to bounded queues to prevent unbounded memory growth
+- adding WS overload observability counters (`ws_events_dropped`, `ws_api_rejected`)
 
 ---
 
@@ -110,7 +133,20 @@ Measures working-set (RSS) growth as the gateway processes events.
 
 ---
 
-## 6. vs. Node.js `onebots`
+## 6. Official Adapter (HTTP) — 2026-03-03
+
+Benchmark target: API round-trip cost of the new `official` HTTP adapter with a local mock backend.
+
+| Benchmark | Time |
+|-----------|------|
+| `official_http/call_api_get_login_info` | **79.8–84.5 µs** |
+| `official_http/call_api_get_status` | **84.3–92.7 µs** |
+
+**Key takeaway**: the dedicated `official` adapter is now implemented and benchmarked; single-call overhead is sub-100µs in local loopback tests.
+
+---
+
+## 7. vs. Node.js `onebots`
 
 A direct apples-to-apples comparison is not yet available (requires running both systems on the same hardware with identical workloads). However, based on architectural analysis:
 
@@ -138,6 +174,7 @@ cargo bench --bench event_bus -p ferroq-gateway
 cargo bench --bench event_parse -p ferroq-gateway
 cargo bench --bench dedup_filter -p ferroq-gateway
 cargo bench --bench pipeline -p ferroq-gateway
+cargo bench --bench official_adapter -p ferroq-gateway
 
 # Memory profile (standalone, not criterion)
 cargo bench --bench memory_profile -p ferroq-gateway
@@ -156,4 +193,4 @@ HTML reports are generated in `target/criterion/` — open `target/criterion/rep
 
 ---
 
-*Last updated: v0.1.0*
+*Last updated: 2026-03-03*

@@ -21,7 +21,7 @@ server:
 | `host` | string | `"0.0.0.0"` | 绑定地址 |
 | `port` | u16 | `8080` | 绑定端口 |
 | `access_token` | string | `""` | 全局 Bearer 令牌，空则不启用认证 |
-| `dashboard` | bool | `true` | 在 `/dashboard/` 提供 Web 仪表盘 |
+| `dashboard` | bool | `true` | 在 `/dashboard`（兼容 `/dashboard/`）提供 Web 仪表盘 |
 | `rate_limit.enabled` | bool | `false` | 启用令牌桶速率限制 |
 | `rate_limit.requests_per_second` | u64 | `100` | 每秒补充速率 |
 | `rate_limit.burst` | u64 | `200` | 最大突发容量 |
@@ -52,7 +52,7 @@ accounts:
 |----|------|--------|------|
 | `name` | string | 必填 | 账户唯一名称 |
 | `backend.type` | string | 必填 | 后端类型 |
-| `backend.url` | string | 必填 | 后端 WebSocket 地址 |
+| `backend.url` | string | 必填 | 后端地址（`lagrange/napcat` 使用 `ws://`，`official` 使用 `http(s)://`） |
 | `backend.access_token` | string | `""` | 后端认证令牌 |
 | `backend.reconnect_interval` | u64 | `5` | 基础重连间隔（秒） |
 | `backend.max_reconnect_interval` | u64 | `120` | 指数退避最大间隔 |
@@ -60,6 +60,10 @@ accounts:
 | `backend.connect_timeout` | u64 | `15` | WS 连接超时（秒） |
 | `backend.api_timeout` | u64 | `30` | API 调用超时（秒） |
 | `fallback` | object | 无 | 可选故障转移后端 |
+
+说明：
+- `official` 后端是 HTTP API 优先适配器，API 调用和健康检查走 HTTP。
+- 事件推送能力取决于后端本身；官方 HTTP 适配器不会主动建立持久 WS 事件流。
 
 ## 协议
 
@@ -140,3 +144,5 @@ logging:
 |------|------|
 | `FERROQ_CONFIG` | 配置文件路径（默认 `config.yaml`） |
 | `RUST_LOG` | 覆盖日志过滤器 |
+| `FERROQ_WS_OUTBOUND_QUEUE_CAPACITY` | 每连接 WS 出站队列容量（`64..65536`，默认 `1024`） |
+| `FERROQ_WS_API_MAX_IN_FLIGHT` | 每连接 WS API 并发上限（`1..8192`，默认 `64`） |

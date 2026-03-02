@@ -217,14 +217,11 @@ async fn handle_ws_upgrade(
 /// 4. Server replies PONG `{ "op": 2 }`
 /// 5. Server pushes EVENT `{ "op": 0, "body": { ... } }`
 async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
-    let (ws_tx, mut ws_rx) = socket.split();
+    let (mut ws_tx, mut ws_rx) = socket.split();
     let stats = Arc::clone(&state.stats);
 
     stats.ws_connect();
     info!("new Satori WS client connected");
-
-    let ws_tx = Arc::new(tokio::sync::Mutex::new(ws_tx));
-    let ws_tx_send = Arc::clone(&ws_tx);
 
     // Wait for IDENTIFY signal (with 10 second timeout).
     let identify_result = tokio::time::timeout(std::time::Duration::from_secs(10), async {
@@ -260,13 +257,12 @@ async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
                     "op": converter::Opcode::Ready as u8,
                     "body": { "logins": [], "proxy_urls": [] },
                 });
-                let mut tx = ws_tx_send.lock().await;
-                let _ = tx
+                let _ = ws_tx
                     .send(AxumWsMessage::Text(
                         serde_json::to_string(&err).unwrap_or_default().into(),
                     ))
                     .await;
-                let _ = tx.close().await;
+                let _ = ws_tx.close().await;
                 stats.ws_disconnect();
                 return;
             }
@@ -275,8 +271,7 @@ async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
         }
         _ => {
             warn!("Satori WS client did not send IDENTIFY in time");
-            let mut tx = ws_tx_send.lock().await;
-            let _ = tx.close().await;
+            let _ = ws_tx.close().await;
             stats.ws_disconnect();
             return;
         }
@@ -296,8 +291,7 @@ async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
         },
     });
     {
-        let mut tx = ws_tx_send.lock().await;
-        if tx
+        if ws_tx
             .send(AxumWsMessage::Text(
                 serde_json::to_string(&ready).unwrap_or_default().into(),
             ))
@@ -318,14 +312,13 @@ async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
     let mut event_rx = state.bus_tx.subscribe();
 
     // Channel for sending messages (events + pong).
-    let (msg_tx, mut msg_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let (msg_tx, mut msg_rx) =
+        tokio::sync::mpsc::channel::<String>(crate::tuning::ws_outbound_queue_capacity());
 
     // Writer task: drain msg_rx → WS.
-    let ws_tx_writer = Arc::clone(&ws_tx);
     let writer_task = tokio::spawn(async move {
         while let Some(text) = msg_rx.recv().await {
-            let mut tx = ws_tx_writer.lock().await;
-            if tx.send(AxumWsMessage::Text(text.into())).await.is_err() {
+            if ws_tx.send(AxumWsMessage::Text(text.into())).await.is_err() {
                 break;
             }
         }
@@ -341,8 +334,13 @@ async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
                     let sn = state_push.next_sn();
                     let signal = converter::event_to_signal(&event, sn);
                     let text = serde_json::to_string(&signal).unwrap_or_default();
-                    if msg_tx_events.send(text).is_err() {
-                        break;
+                    match msg_tx_events.try_send(text) {
+                        Ok(()) => {}
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                            state_push.stats.record_ws_event_dropped();
+                            debug!("Satori WS outbound queue full, dropping event");
+                        }
+                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
@@ -374,7 +372,7 @@ async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
                             "op": converter::Opcode::Pong as u8,
                         });
                         let text = serde_json::to_string(&pong).unwrap_or_default();
-                        let _ = msg_tx.send(text);
+                        let _ = msg_tx.send(text).await;
                     }
                     _ => {
                         debug!(op, "unexpected Satori WS opcode");

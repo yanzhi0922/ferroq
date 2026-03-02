@@ -22,6 +22,11 @@ ferroq 在以下场景有价值：
 
 没有。ferroq 是**网关/代理**，不是协议实现。它依赖 Lagrange.OneBot 或 NapCat 等后端处理实际的 QQ 协议。
 
+支持的后端输出包括：
+- Lagrange.OneBot（WebSocket）
+- NapCat（WebSocket）
+- official 适配器（HTTP action API）
+
 ## 性能
 
 ### ferroq 有多快？
@@ -73,5 +78,5 @@ curl -X POST http://localhost:8080/api/accounts/add \
 
 - **健康检查**：`GET /health`
 - **Prometheus**：`GET /metrics`
-- **仪表盘**：`GET /dashboard/`
+- **仪表盘**：`GET /dashboard`（或 `/dashboard/`）
 - **日志**：通过 `tracing` 结构化日志

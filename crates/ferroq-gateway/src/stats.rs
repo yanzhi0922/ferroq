@@ -26,6 +26,10 @@ pub struct RuntimeStats {
     pub messages_stored: AtomicU64,
     /// Total duplicate events suppressed.
     pub events_deduplicated: AtomicU64,
+    /// Total events dropped at protocol WS outbound queues (backpressure).
+    pub ws_events_dropped: AtomicU64,
+    /// Total WS API requests rejected due to in-flight limits.
+    pub ws_api_rejected: AtomicU64,
     /// Whether message storage is enabled.
     storage_enabled: bool,
     /// Adapter status snapshots.
@@ -64,6 +68,8 @@ pub struct HealthResponse {
     pub uptime_secs: u64,
     pub events_total: u64,
     pub events_deduplicated: u64,
+    pub ws_events_dropped: u64,
+    pub ws_api_rejected: u64,
     pub api_calls_total: u64,
     pub ws_connections: u64,
     pub ws_connections_total: u64,
@@ -89,6 +95,8 @@ impl RuntimeStats {
             ws_connections_total: AtomicU64::new(0),
             messages_stored: AtomicU64::new(0),
             events_deduplicated: AtomicU64::new(0),
+            ws_events_dropped: AtomicU64::new(0),
+            ws_api_rejected: AtomicU64::new(0),
             storage_enabled,
             adapters: RwLock::new(Vec::new()),
             per_adapter_events: RwLock::new(HashMap::new()),
@@ -141,6 +149,16 @@ impl RuntimeStats {
         self.events_deduplicated.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Record an event dropped from WS outbound queues due to backpressure.
+    pub fn record_ws_event_dropped(&self) {
+        self.ws_events_dropped.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a WS API request rejected due to in-flight limits.
+    pub fn record_ws_api_rejected(&self) {
+        self.ws_api_rejected.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Update the adapter snapshots.
     pub fn update_adapters(&self, snapshots: Vec<AdapterSnapshot>) {
         *self.adapters.write() = snapshots;
@@ -169,6 +187,8 @@ impl RuntimeStats {
             uptime_secs: self.start_time.elapsed().as_secs(),
             events_total: self.events_total.load(Ordering::Relaxed),
             events_deduplicated: self.events_deduplicated.load(Ordering::Relaxed),
+            ws_events_dropped: self.ws_events_dropped.load(Ordering::Relaxed),
+            ws_api_rejected: self.ws_api_rejected.load(Ordering::Relaxed),
             api_calls_total: self.api_calls_total.load(Ordering::Relaxed),
             ws_connections: self.ws_connections.load(Ordering::Relaxed),
             ws_connections_total: self.ws_connections_total.load(Ordering::Relaxed),
@@ -209,6 +229,24 @@ impl RuntimeStats {
         out.push_str(&format!(
             "ferroq_events_deduplicated_total {}\n\n",
             health.events_deduplicated
+        ));
+
+        out.push_str(
+            "# HELP ferroq_ws_events_dropped_total Total WS outbound events dropped by backpressure.\n",
+        );
+        out.push_str("# TYPE ferroq_ws_events_dropped_total counter\n");
+        out.push_str(&format!(
+            "ferroq_ws_events_dropped_total {}\n\n",
+            health.ws_events_dropped
+        ));
+
+        out.push_str(
+            "# HELP ferroq_ws_api_rejected_total Total WS API requests rejected by in-flight limits.\n",
+        );
+        out.push_str("# TYPE ferroq_ws_api_rejected_total counter\n");
+        out.push_str(&format!(
+            "ferroq_ws_api_rejected_total {}\n\n",
+            health.ws_api_rejected
         ));
 
         out.push_str("# HELP ferroq_api_calls_total Total API calls routed.\n");
@@ -364,10 +402,14 @@ mod tests {
         let stats = RuntimeStats::new();
         stats.record_event_for("test-adapter");
         stats.record_api_call_for("test-adapter");
+        stats.record_ws_event_dropped();
+        stats.record_ws_api_rejected();
 
         let output = stats.prometheus_metrics();
         assert!(output.contains("ferroq_adapter_events_total{name=\"test-adapter\"} 1"));
         assert!(output.contains("ferroq_adapter_api_calls_total{name=\"test-adapter\"} 1"));
+        assert!(output.contains("ferroq_ws_events_dropped_total 1"));
+        assert!(output.contains("ferroq_ws_api_rejected_total 1"));
     }
 
     #[test]

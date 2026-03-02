@@ -789,7 +789,7 @@ checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 
 [[package]]
 name = "ferroq"
-version = "0.1.0"
+version = "1.0.0-rc"
 dependencies = [
  "anyhow",
  "axum",
@@ -808,7 +808,7 @@ dependencies = [
 
 [[package]]
 name = "ferroq-core"
-version = "0.1.0"
+version = "1.0.0-rc"
 dependencies = [
  "async-trait",
  "bytes",
@@ -826,7 +826,7 @@ dependencies = [
 
 [[package]]
 name = "ferroq-gateway"
-version = "0.1.0"
+version = "1.0.0-rc"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -857,7 +857,7 @@ dependencies = [
 
 [[package]]
 name = "ferroq-web"
-version = "0.1.0"
+version = "1.0.0-rc"
 dependencies = [
  "anyhow",
  "axum",

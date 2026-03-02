@@ -21,7 +21,7 @@ server:
 | `host` | string | `"0.0.0.0"` | Bind address |
 | `port` | u16 | `8080` | Bind port |
 | `access_token` | string | `""` | Global Bearer token for API auth. Empty disables auth. |
-| `dashboard` | bool | `true` | Serve the embedded web dashboard at `/dashboard/` |
+| `dashboard` | bool | `true` | Serve the embedded web dashboard at `/dashboard` (and `/dashboard/`) |
 | `rate_limit.enabled` | bool | `false` | Enable token-bucket rate limiting |
 | `rate_limit.requests_per_second` | u64 | `100` | Refill rate |
 | `rate_limit.burst` | u64 | `200` | Maximum burst size |
@@ -53,7 +53,7 @@ accounts:
 |-----|------|---------|-------------|
 | `name` | string | required | Unique name for this account |
 | `backend.type` | string | required | Backend type: `lagrange`, `napcat`, `official`, `mock` |
-| `backend.url` | string | required | WebSocket URL of the backend |
+| `backend.url` | string | required | Backend URL (`ws://` for lagrange/napcat, `http(s)://` for official) |
 | `backend.access_token` | string | `""` | Token to authenticate with the backend |
 | `backend.reconnect_interval` | u64 | `5` | Base reconnect interval (seconds) |
 | `backend.max_reconnect_interval` | u64 | `120` | Max reconnect interval after exponential backoff |
@@ -61,6 +61,10 @@ accounts:
 | `backend.connect_timeout` | u64 | `15` | WebSocket connect timeout (seconds) |
 | `backend.api_timeout` | u64 | `30` | API call response timeout (seconds) |
 | `fallback` | object | none | Optional fallback backend for failover |
+
+Notes:
+- `official` backend is HTTP API-first. It forwards API calls and performs health checks over HTTP.
+- Event push behavior depends on backend capabilities; the official HTTP adapter itself does not open a persistent WS event stream.
 
 ## Protocols
 
@@ -159,3 +163,5 @@ logging:
 |----------|-------------|
 | `FERROQ_CONFIG` | Path to config file (default: `config.yaml`) |
 | `RUST_LOG` | Override log filter (standard `tracing` format) |
+| `FERROQ_WS_OUTBOUND_QUEUE_CAPACITY` | Per-connection WS outbound queue capacity (`64..65536`, default `1024`) |
+| `FERROQ_WS_API_MAX_IN_FLIGHT` | Per-connection concurrent WS API limit (`1..8192`, default `64`) |

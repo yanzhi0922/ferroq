@@ -24,13 +24,14 @@
 Instead of reimplementing the QQ protocol, ferroq acts as a **unified proxy / router**, providing:
 
 - 🚀 **Extreme performance** — async Rust, zero-copy message forwarding, <1ms added latency
-- 🔄 **Multi-protocol support** — OneBot v11 (full), with OneBot v12 / Milky / Satori planned
+- 🔄 **Multi-protocol support** — OneBot v11, OneBot v12, Satori
 - 🔌 **Backend agnostic** — Lagrange.OneBot, NapCat — hot-swap without restarting
 - 📊 **Built-in dashboard** — web UI for monitoring adapters, per-adapter event/API metrics
 - 🛡️ **Reliability** — exponential backoff reconnect, health checks, configurable timeouts
-- � **Failover** — automatic primary/fallback adapter switching on connection errors
+- 🧱 **Bounded WS backpressure** — per-connection outbound queue limits to prevent slow-client OOM
+- 🔀 **Failover** — automatic primary/fallback adapter switching on connection errors
 - 🧹 **Event deduplication** — time-windowed fingerprint filter, prevents duplicates from failover
-- �💾 **Message storage** — optional SQLite-based message persistence with search & pagination
+- 💾 **Message storage** — optional SQLite-based message persistence with search & pagination
 - 🔒 **Security** — Bearer / query-param auth, HMAC-SHA1 HTTP POST signing, secret redaction
 - ⚡ **Hot reload** — `POST /api/reload` updates access token and rate-limit params without restart
 - 📈 **Observability** — Prometheus `/metrics`, per-adapter event/API counters, health API
@@ -159,13 +160,31 @@ storage:
 
 See [config.example.yaml](config.example.yaml) for the full configuration reference.
 
+Notes:
+- `lagrange` / `napcat` backends use `ws://...` OneBot v11 forward WS endpoints.
+- `official` backend uses `http://...` or `https://...` HTTP action API endpoints.
+
+### Runtime Tuning (Optional)
+
+Use environment variables to tune WS pressure behavior without rebuilding:
+
+```bash
+export FERROQ_WS_OUTBOUND_QUEUE_CAPACITY=2048
+export FERROQ_WS_API_MAX_IN_FLIGHT=128
+```
+
+| Variable | Default | Range | Description |
+|----------|---------|-------|-------------|
+| `FERROQ_WS_OUTBOUND_QUEUE_CAPACITY` | `1024` | `64..65536` | Per-connection WS outbound queue capacity |
+| `FERROQ_WS_API_MAX_IN_FLIGHT` | `64` | `1..8192` | Per-connection concurrent WS API request limit |
+
 ## Endpoints
 
 | Endpoint | Description |
 |----------|-------------|
 | `GET /health` | Health check — JSON with uptime, counters, adapter snapshots |
 | `GET /metrics` | Prometheus-format metrics (per-adapter event/API counters) |
-| `GET /dashboard/` | Embedded web dashboard |
+| `GET /dashboard` or `GET /dashboard/` | Embedded web dashboard |
 | `GET /api/accounts` | List all registered backend adapters |
 | `POST /api/accounts/add` | Add a new adapter at runtime |
 | `POST /api/accounts/{name}/remove` | Remove an adapter |
@@ -176,9 +195,9 @@ See [config.example.yaml](config.example.yaml) for the full configuration refere
 | `POST /api/reload` | Hot-reload access token and rate-limit params |
 | `POST /onebot/v11/api/:action` | OneBot v11 HTTP API |
 | `WS /onebot/v11/ws` | OneBot v11 forward WebSocket |
-| `POST /onebot/v12/api/:action` | OneBot v12 HTTP API |
+| `POST /onebot/v12/action` | OneBot v12 HTTP API |
 | `WS /onebot/v12/ws` | OneBot v12 WebSocket |
-| `POST /satori/v1/` | Satori HTTP API |
+| `POST /satori/v1/{resource}.{method}` | Satori HTTP API |
 | `WS /satori/v1/events` | Satori event WebSocket |
 
 ## Performance
@@ -196,6 +215,22 @@ Measured with [criterion](https://github.com/bheisler/criterion.rs) on real code
 | Memory (100K events processed) | **10 MB** |
 
 See [BENCHMARK.md](BENCHMARK.md) for full results, methodology, and how to reproduce.
+
+### Competitive benchmarking
+
+To compare ferroq vs another gateway on the same host and workload:
+
+```bash
+pwsh -File scripts/compare_gateways.ps1 \
+  -CompetitorName "NapCat" \
+  -CompetitorUrl "http://127.0.0.1:3000/onebot/v11/api/get_login_info" \
+  -FerroqUrl "http://127.0.0.1:8080/onebot/v11/api/get_login_info" \
+  -FerroqToken "your-token" \
+  -CompetitorToken "your-token" \
+  -Requests 5000 -Concurrency 200
+```
+
+This generates `COMPARE_BENCHMARK.md` with throughput, error rate, and p50/p95/p99 latency.
 
 ## Roadmap
 
@@ -243,6 +278,9 @@ cargo test --workspace
 
 # Run with clippy
 cargo clippy --workspace -- -D warnings
+
+# Benchmark official HTTP adapter
+cargo bench --bench official_adapter -p ferroq-gateway
 ```
 
 ## License

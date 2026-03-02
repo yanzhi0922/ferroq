@@ -84,7 +84,7 @@ protocols:
 1. 启动后端（如 Lagrange.OneBot）
 2. 启动 ferroq：`./ferroq`
 3. 检查健康状态：`curl http://localhost:8080/health`
-4. 打开仪表盘：`http://localhost:8080/dashboard/`
+4. 打开仪表盘：`http://localhost:8080/dashboard`（或 `/dashboard/`）
 
 你应该在健康响应中看到后端状态为 "connected"。
 

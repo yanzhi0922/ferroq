@@ -13,6 +13,7 @@ ferroq is designed for extreme performance. This page summarizes benchmark resul
 | Event bus throughput (small) | **2.16M msg/s** | 1K msg/s |
 | End-to-end throughput (1 KB) | **63K msg/s** | 1K msg/s |
 | Event parsing (OneBot v11) | **2.6 µs** | — |
+| Official adapter API call (HTTP) | **~90 µs** | — |
 | Dedup check | **670 ns** | — |
 | Memory (idle) | **4.9 MB** | < 10 MB |
 | Memory (100K events) | **10 MB** | < 30 MB |
@@ -38,7 +39,7 @@ The release binary uses LTO (Link-Time Optimization), single codegen unit, and s
 ## Running Benchmarks
 
 ```bash
-# Criterion benchmarks (event_bus, event_parse, dedup_filter, pipeline)
+# Criterion benchmarks (event_bus, event_parse, dedup_filter, pipeline, official_adapter)
 cargo bench -p ferroq-gateway
 
 # Memory profile

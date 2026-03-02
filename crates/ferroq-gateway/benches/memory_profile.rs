@@ -164,7 +164,8 @@ fn main() {
         fmt_bytes(after_bus_full.saturating_sub(after_100k))
     );
 
-    println!("\n[total]          RSS = {} (total delta +{})",
+    println!(
+        "\n[total]          RSS = {} (total delta +{})",
         fmt_bytes(after_bus_full),
         fmt_bytes(after_bus_full.saturating_sub(baseline))
     );

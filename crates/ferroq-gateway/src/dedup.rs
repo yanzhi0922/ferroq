@@ -34,14 +34,16 @@ type Fingerprint = u128;
 pub struct DedupFilter {
     /// Window duration — fingerprints older than this are evicted.
     window: Duration,
+    /// Monotonic start point used for atomic eviction timestamps.
+    start: Instant,
     /// Map from fingerprint → insertion time.
     seen: Mutex<HashMap<Fingerprint, Instant>>,
     /// Counter: total duplicates suppressed.
     duplicates: AtomicU64,
     /// Counter: total events checked.
     checked: AtomicU64,
-    /// Last eviction time — we don't evict on every call for performance.
-    last_eviction: Mutex<Instant>,
+    /// Last eviction time (nanoseconds since `start`).
+    last_eviction_ns: AtomicU64,
     /// Minimum interval between eviction sweeps.
     eviction_interval: Duration,
 }
@@ -52,12 +54,14 @@ impl DedupFilter {
     /// Events with the same fingerprint arriving within `window_secs` are
     /// considered duplicates.
     pub fn new(window_secs: u64) -> Self {
+        let start = Instant::now();
         Self {
             window: Duration::from_secs(window_secs),
-            seen: Mutex::new(HashMap::new()),
+            start,
+            seen: Mutex::new(HashMap::with_capacity(8192)),
             duplicates: AtomicU64::new(0),
             checked: AtomicU64::new(0),
-            last_eviction: Mutex::new(Instant::now()),
+            last_eviction_ns: AtomicU64::new(0),
             eviction_interval: Duration::from_secs(window_secs.max(10)),
         }
     }
@@ -94,11 +98,20 @@ impl DedupFilter {
 
     /// Evict expired entries if enough time has passed since the last sweep.
     fn maybe_evict(&self, seen: &mut HashMap<Fingerprint, Instant>, now: Instant) {
-        let mut last = self.last_eviction.lock();
-        if now.duration_since(*last) >= self.eviction_interval {
+        let now_ns = now.duration_since(self.start).as_nanos() as u64;
+        let interval_ns = self.eviction_interval.as_nanos() as u64;
+        let last_ns = self.last_eviction_ns.load(Ordering::Relaxed);
+        if now_ns.saturating_sub(last_ns) < interval_ns {
+            return;
+        }
+
+        if self
+            .last_eviction_ns
+            .compare_exchange(last_ns, now_ns, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+        {
             let window = self.window;
             seen.retain(|_, &mut ts| now.duration_since(ts) < window);
-            *last = now;
         }
     }
 
@@ -158,25 +171,71 @@ impl DedupFilter {
     ) -> Fingerprint {
         use std::hash::{Hash, Hasher};
 
-        // We use a simple FNV-like approach to build a 128-bit fingerprint.
+        // Build a stable 128-bit fingerprint without allocating intermediate
+        // JSON strings (hot path under high event throughput).
         let mut hasher = std::hash::DefaultHasher::new();
         self_id.hash(&mut hasher);
         event_type.hash(&mut hasher);
         sub_type.hash(&mut hasher);
         timestamp.hash(&mut hasher);
-        // Hash the string representation of extra for determinism.
-        let extra_str = extra.to_string();
-        extra_str.hash(&mut hasher);
+        Self::hash_json_value(extra, &mut hasher);
         let lo = hasher.finish();
 
         // Second hash pass for the high bits (reduce collision probability).
         let mut hasher2 = std::hash::DefaultHasher::new();
         lo.hash(&mut hasher2);
-        extra_str.hash(&mut hasher2);
         self_id.hash(&mut hasher2);
+        timestamp.hash(&mut hasher2);
+        Self::hash_json_value(extra, &mut hasher2);
         let hi = hasher2.finish();
 
         ((hi as u128) << 64) | (lo as u128)
+    }
+
+    fn hash_json_value<H: std::hash::Hasher>(value: &serde_json::Value, hasher: &mut H) {
+        use std::hash::Hash;
+
+        match value {
+            serde_json::Value::Null => {
+                0u8.hash(hasher);
+            }
+            serde_json::Value::Bool(b) => {
+                1u8.hash(hasher);
+                b.hash(hasher);
+            }
+            serde_json::Value::Number(n) => {
+                2u8.hash(hasher);
+                if let Some(i) = n.as_i64() {
+                    0u8.hash(hasher);
+                    i.hash(hasher);
+                } else if let Some(u) = n.as_u64() {
+                    1u8.hash(hasher);
+                    u.hash(hasher);
+                } else if let Some(f) = n.as_f64() {
+                    2u8.hash(hasher);
+                    f.to_bits().hash(hasher);
+                }
+            }
+            serde_json::Value::String(s) => {
+                3u8.hash(hasher);
+                s.hash(hasher);
+            }
+            serde_json::Value::Array(arr) => {
+                4u8.hash(hasher);
+                arr.len().hash(hasher);
+                for v in arr {
+                    Self::hash_json_value(v, hasher);
+                }
+            }
+            serde_json::Value::Object(map) => {
+                5u8.hash(hasher);
+                map.len().hash(hasher);
+                for (k, v) in map {
+                    k.hash(hasher);
+                    Self::hash_json_value(v, hasher);
+                }
+            }
+        }
     }
 }
 

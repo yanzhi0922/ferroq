@@ -20,4 +20,5 @@
 
 - [架构设计](./reference/architecture.md)
 - [性能基准](./reference/performance.md)
+- [竞品对照压测](./reference/competitive-benchmark.md)
 - [常见问题](./reference/faq.md)

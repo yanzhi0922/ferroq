@@ -20,4 +20,5 @@
 
 - [Architecture](./reference/architecture.md)
 - [Performance](./reference/performance.md)
+- [Competitive Benchmarking](./reference/competitive-benchmark.md)
 - [FAQ](./reference/faq.md)

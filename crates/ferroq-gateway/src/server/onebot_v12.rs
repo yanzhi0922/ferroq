@@ -241,7 +241,7 @@ async fn handle_ws_upgrade(
 
 /// Handle an active forward WebSocket connection.
 async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
-    let (ws_tx, mut ws_rx) = socket.split();
+    let (mut ws_tx, mut ws_rx) = socket.split();
     let mut event_rx = state.bus_tx.subscribe();
     let router = Arc::clone(&state.router);
     let stats = Arc::clone(&state.stats);
@@ -250,15 +250,16 @@ async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
     info!("new OneBot v12 forward WS client connected");
 
     // Shared writer channel.
-    let (msg_tx, mut msg_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let (msg_tx, mut msg_rx) =
+        tokio::sync::mpsc::channel::<String>(crate::tuning::ws_outbound_queue_capacity());
+    let api_semaphore = Arc::new(tokio::sync::Semaphore::new(
+        crate::tuning::ws_api_max_in_flight(),
+    ));
 
     // Task: drain msg_rx and write to WS.
-    let ws_tx = Arc::new(tokio::sync::Mutex::new(ws_tx));
-    let ws_tx_clone = Arc::clone(&ws_tx);
     let writer_task = tokio::spawn(async move {
         while let Some(text) = msg_rx.recv().await {
-            let mut tx = ws_tx_clone.lock().await;
-            if tx.send(AxumWsMessage::Text(text.into())).await.is_err() {
+            if ws_tx.send(AxumWsMessage::Text(text.into())).await.is_err() {
                 break;
             }
         }
@@ -266,14 +267,20 @@ async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
 
     // Task: push events to the WS client in v12 format.
     let msg_tx_events = msg_tx.clone();
+    let stats_push = Arc::clone(&stats);
     let push_task = tokio::spawn(async move {
         loop {
             match event_rx.recv().await {
                 Ok(event) => {
                     let json = converter::event_to_json(&event);
                     let text = serde_json::to_string(&json).unwrap_or_default();
-                    if msg_tx_events.send(text).is_err() {
-                        break;
+                    match msg_tx_events.try_send(text) {
+                        Ok(()) => {}
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                            stats_push.record_ws_event_dropped();
+                            debug!("v12 forward WS outbound queue full, dropping event");
+                        }
+                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
@@ -308,7 +315,7 @@ async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
                     Err(e) => {
                         let resp = v12_error_response(10001, e.to_string(), echo);
                         let text = serde_json::to_string(&resp).unwrap_or_default();
-                        let _ = msg_tx.send(text);
+                        let _ = msg_tx.send(text).await;
                         continue;
                     }
                 };
@@ -316,8 +323,24 @@ async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
                 let msg_tx_resp = msg_tx.clone();
                 let router_clone = Arc::clone(&router);
                 let stats_clone = Arc::clone(&stats);
+                let permit = match api_semaphore.clone().try_acquire_owned() {
+                    Ok(p) => p,
+                    Err(_) => {
+                        let resp = v12_error_response(
+                            20002,
+                            "too many in-flight WS API requests".to_string(),
+                            echo.clone(),
+                        );
+                        let text = serde_json::to_string(&resp).unwrap_or_default();
+                        let _ = msg_tx.send(text).await;
+                        stats.record_ws_api_rejected();
+                        warn!("v12 forward WS API overload, request rejected");
+                        continue;
+                    }
+                };
 
                 tokio::spawn(async move {
+                    let _permit = permit;
                     let resp = match router_clone.route_named(request).await {
                         Ok((resp, adapter_name)) => {
                             stats_clone.record_api_call_for(&adapter_name);
@@ -326,7 +349,7 @@ async fn handle_ws_connection(socket: WebSocket, state: Arc<ServerState>) {
                         Err(e) => v12_error_response(20002, e.to_string(), echo),
                     };
                     let text = serde_json::to_string(&resp).unwrap_or_default();
-                    let _ = msg_tx_resp.send(text);
+                    let _ = msg_tx_resp.send(text).await;
                 });
             }
             AxumWsMessage::Close(_) => break,

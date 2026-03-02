@@ -183,6 +183,20 @@ async fn main() -> anyhow::Result<()> {
                 );
                 std::sync::Arc::new(adapter)
             }
+            "official" => {
+                let adapter = ferroq_gateway::adapter::OfficialAdapter::from_backend_config(
+                    &account.name,
+                    &account.backend,
+                )
+                .map_err(|e| anyhow::anyhow!("failed to create official adapter: {}", e))?;
+                info!(
+                    name = %account.name,
+                    backend = %account.backend.backend_type,
+                    url = %account.backend.url,
+                    "created official backend adapter"
+                );
+                std::sync::Arc::new(adapter)
+            }
             other => {
                 tracing::warn!(name = %account.name, backend = %other, "unknown backend type, skipping");
                 continue;
@@ -205,6 +219,26 @@ async fn main() -> anyhow::Result<()> {
                                 fallback_backend = %fb_config.backend_type,
                                 fallback_url = %fb_config.url,
                                 "created fallback adapter"
+                            );
+                            std::sync::Arc::new(fb_adapter)
+                        }
+                        "official" => {
+                            let fb_adapter =
+                                ferroq_gateway::adapter::OfficialAdapter::from_backend_config(
+                                    format!("{}-fallback", account.name),
+                                    fb_config,
+                                )
+                                .map_err(|e| {
+                                    anyhow::anyhow!(
+                                        "failed to create official fallback adapter: {}",
+                                        e
+                                    )
+                                })?;
+                            info!(
+                                name = %account.name,
+                                fallback_backend = %fb_config.backend_type,
+                                fallback_url = %fb_config.url,
+                                "created official fallback adapter"
                             );
                             std::sync::Arc::new(fb_adapter)
                         }
@@ -292,7 +326,6 @@ async fn main() -> anyhow::Result<()> {
 
     let metrics_stats = stats.clone();
     let mut app = axum::Router::new()
-        .nest("/dashboard", ferroq_web::dashboard_routes())
         .nest("/api", mgmt_router)
         .route(
             "/health",
@@ -316,6 +349,18 @@ async fn main() -> anyhow::Result<()> {
                 }
             }),
         );
+
+    if config.server.dashboard {
+        app = app
+            .route(
+                "/dashboard/",
+                axum::routing::get(|| async { axum::response::Redirect::temporary("/dashboard") }),
+            )
+            .nest("/dashboard", ferroq_web::dashboard_routes());
+        info!("embedded dashboard enabled");
+    } else {
+        info!("embedded dashboard disabled by config");
+    }
 
     // OneBot v11 protocol server.
     let onebot_v11_server = if let Some(ref ob_config) = config.protocols.onebot_v11 {

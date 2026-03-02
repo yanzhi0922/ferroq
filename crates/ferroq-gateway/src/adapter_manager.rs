@@ -18,7 +18,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
-use crate::adapter::LagrangeAdapter;
+use crate::adapter::{LagrangeAdapter, OfficialAdapter};
 use crate::bus::EventBus;
 use crate::dedup::DedupFilter;
 use crate::forward;
@@ -101,6 +101,10 @@ impl AdapterManager {
         let adapter: Arc<dyn BackendAdapter> = match config.backend_type.as_str() {
             "lagrange" | "napcat" => {
                 let a = LagrangeAdapter::from_backend_config(name, config);
+                Arc::new(a)
+            }
+            "official" => {
+                let a = OfficialAdapter::from_backend_config(name, config)?;
                 Arc::new(a)
             }
             other => {

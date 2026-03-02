@@ -20,7 +20,7 @@ pub fn parse_event(raw: serde_json::Value) -> Result<Event, GatewayError> {
     let time = parse_time(&raw);
 
     match post_type {
-        "message" | "message_sent" => parse_message_event(raw, self_id, time),
+        "message" | "message_sent" => parse_message_event(&raw, self_id, time),
         "notice" => parse_notice_event(raw, self_id, time),
         "request" => parse_request_event(raw, self_id, time),
         "meta_event" => parse_meta_event(raw, self_id, time),
@@ -40,7 +40,7 @@ fn parse_time(raw: &serde_json::Value) -> DateTime<Utc> {
 
 /// Parse a message event.
 fn parse_message_event(
-    raw: serde_json::Value,
+    raw: &serde_json::Value,
     self_id: i64,
     time: DateTime<Utc>,
 ) -> Result<Event, GatewayError> {
@@ -75,10 +75,10 @@ fn parse_message_event(
     let font = raw.get("font").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
 
     // Parse message segments.
-    let message = parse_message_segments(&raw);
+    let message = parse_message_segments(raw);
 
     // Parse sender.
-    let sender = parse_sender(&raw);
+    let sender = parse_sender(raw);
 
     Ok(Event::Message(Box::new(MessageEvent {
         id: Uuid::new_v4(),
@@ -111,11 +111,8 @@ fn parse_message_segments(raw: &serde_json::Value) -> Vec<MessageSegment> {
     arr.iter()
         .filter_map(|seg| {
             let seg_type = seg.get("type")?.as_str()?;
-            let data = seg
-                .get("data")
-                .cloned()
-                .unwrap_or(serde_json::Value::Object(Default::default()));
-            parse_single_segment(seg_type, &data)
+            let data = seg.get("data").unwrap_or(&serde_json::Value::Null);
+            parse_single_segment(seg_type, data)
         })
         .collect()
 }
@@ -219,38 +216,44 @@ fn parse_single_segment(seg_type: &str, data: &serde_json::Value) -> Option<Mess
 
 /// Parse a sender object.
 fn parse_sender(raw: &serde_json::Value) -> Sender {
-    let sender = raw
-        .get("sender")
-        .cloned()
-        .unwrap_or(serde_json::Value::Object(Default::default()));
+    let sender = raw.get("sender");
 
     Sender {
-        user_id: sender.get("user_id").and_then(|v| v.as_i64()).unwrap_or(0),
+        user_id: sender
+            .and_then(|v| v.get("user_id"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0),
         nickname: sender
-            .get("nickname")
+            .and_then(|v| v.get("nickname"))
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string(),
         card: sender
-            .get("card")
+            .and_then(|v| v.get("card"))
             .and_then(|v| v.as_str())
             .map(String::from),
-        sex: sender.get("sex").and_then(|v| v.as_str()).map(String::from),
-        age: sender.get("age").and_then(|v| v.as_i64()).map(|v| v as i32),
+        sex: sender
+            .and_then(|v| v.get("sex"))
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        age: sender
+            .and_then(|v| v.get("age"))
+            .and_then(|v| v.as_i64())
+            .map(|v| v as i32),
         area: sender
-            .get("area")
+            .and_then(|v| v.get("area"))
             .and_then(|v| v.as_str())
             .map(String::from),
         level: sender
-            .get("level")
+            .and_then(|v| v.get("level"))
             .and_then(|v| v.as_str())
             .map(String::from),
         role: sender
-            .get("role")
+            .and_then(|v| v.get("role"))
             .and_then(|v| v.as_str())
             .map(String::from),
         title: sender
-            .get("title")
+            .and_then(|v| v.get("title"))
             .and_then(|v| v.as_str())
             .map(String::from),
     }

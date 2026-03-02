@@ -22,7 +22,9 @@ accounts:
     backend:
       # Backend type: lagrange, napcat, official, mock
       type: lagrange
-      # WebSocket URL of the backend (Lagrange.OneBot forward WS)
+      # Backend URL:
+      # - lagrange/napcat: ws://... (OneBot v11 forward WS)
+      # - official: http://... or https://... (HTTP action API)
       url: "ws://127.0.0.1:8081/onebot/v11/ws"
       # Access token for the backend
       access_token: ""

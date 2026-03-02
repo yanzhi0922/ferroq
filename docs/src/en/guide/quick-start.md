@@ -84,7 +84,7 @@ protocols:
 1. Start your backend (e.g. Lagrange.OneBot)
 2. Start ferroq: `./ferroq`
 3. Check health: `curl http://localhost:8080/health`
-4. Open dashboard: `http://localhost:8080/dashboard/`
+4. Open dashboard: `http://localhost:8080/dashboard` (or `/dashboard/`)
 
 You should see your backend listed as "connected" in the health response.
 

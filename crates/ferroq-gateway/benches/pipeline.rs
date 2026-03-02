@@ -5,7 +5,7 @@
 
 mod helpers;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use ferroq_gateway::bus::EventBus;
 use ferroq_gateway::dedup::DedupFilter;
 use ferroq_gateway::onebot_v11;

@@ -69,3 +69,7 @@ harness = false
 [[bench]]
 name = "memory_profile"
 harness = false
+
+[[bench]]
+name = "official_adapter"
+harness = false

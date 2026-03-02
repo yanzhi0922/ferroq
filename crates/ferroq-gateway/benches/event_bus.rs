@@ -2,7 +2,7 @@
 
 mod helpers;
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use ferroq_gateway::bus::EventBus;
 use std::sync::Arc;
 use tokio::runtime::Runtime;

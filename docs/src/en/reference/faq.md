@@ -28,6 +28,7 @@ If you only have one backend and one bot framework, a direct connection is simpl
 **Outbound (to backends):**
 - Lagrange.OneBot (WebSocket)
 - NapCat (WebSocket)
+- Official adapter (HTTP action API)
 
 ### Does ferroq implement the QQ protocol?
 
@@ -90,5 +91,5 @@ curl -X POST http://localhost:8080/api/accounts/add \
 
 - **Health check:** `GET /health` — JSON with uptime, counters, adapter status
 - **Prometheus:** `GET /metrics` — standard Prometheus text format
-- **Dashboard:** `GET /dashboard/` — embedded web UI
+- **Dashboard:** `GET /dashboard` (or `/dashboard/`) — embedded web UI
 - **Logs:** structured logging via `tracing` (JSON format available)
